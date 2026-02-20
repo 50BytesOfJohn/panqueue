@@ -1,0 +1,32 @@
+{
+  "template": "#{{CHANGELOG}}\n\n**Full Changelog**: #{{RELEASE_DIFF}}",
+  "empty_template": "- No user-facing changes were detected for this package in this release.",
+  "pr_template": "- #{{TITLE}} by @#{{AUTHOR}} in [#{{NUMBER}}](#{{URL}})",
+  "categories": [
+    {
+      "title": "## Breaking Changes",
+      "labels": ["breaking", "breaking-change"]
+    },
+    {
+      "title": "## Features",
+      "labels": ["feature", "enhancement", "feat"]
+    },
+    {
+      "title": "## Fixes",
+      "labels": ["fix", "bug", "bugfix"]
+    },
+    {
+      "title": "## Documentation",
+      "labels": ["documentation", "docs"]
+    },
+    {
+      "title": "## Maintenance",
+      "labels": ["chore", "refactor", "build", "ci", "dependencies"]
+    }
+  ],
+  "ignore_labels": ["skip-changelog", "ignore-for-release-notes"],
+  "sort": {
+    "order": "ASC",
+    "on_property": "mergedAt"
+  }
+}

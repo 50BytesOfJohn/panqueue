@@ -1,0 +1,162 @@
+name: Publish to JSR
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - packages/*/deno.json
+  workflow_dispatch:
+
+concurrency:
+  group: jsr-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+  id-token: write
+
+jobs:
+  detect:
+    name: Detect package version changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.changed_packages.outputs.changed }}
+      matrix: ${{ steps.changed_packages.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed packages
+        id: changed_packages
+        run: |
+          set -euo pipefail
+
+          before_ref="${{ github.event.before }}"
+          after_ref="${{ github.sha }}"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ -z "${before_ref}" ] || [ "${before_ref}" = "0000000000000000000000000000000000000000" ]; then
+            if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              before_ref="$(git rev-parse HEAD^)"
+            else
+              before_ref="$(git rev-list --max-parents=0 HEAD)"
+            fi
+          fi
+
+          changed="false"
+          matrix_entries=""
+
+          for file in $(git diff --name-only "${before_ref}" "${after_ref}" -- packages/*/deno.json); do
+            if ! git diff "${before_ref}" "${after_ref}" -- "${file}" | grep -E '^[+-][[:space:]]*"version":[[:space:]]*"' >/dev/null; then
+              continue
+            fi
+
+            changed="true"
+
+            package_path="$(dirname "${file}")"
+            package_key="$(basename "${package_path}")"
+            package_name="$(git show "${after_ref}:${file}" | sed -n 's/.*"name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+            package_version="$(git show "${after_ref}:${file}" | sed -n 's/.*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+            package_tag="${package_key}-v${package_version}"
+
+            entry=$(printf '{"key":"%s","name":"%s","path":"%s","version":"%s","tag":"%s"}' \
+              "${package_key}" "${package_name}" "${package_path}" "${package_version}" "${package_tag}")
+
+            if [ -z "${matrix_entries}" ]; then
+              matrix_entries="${entry}"
+            else
+              matrix_entries="${matrix_entries},${entry}"
+            fi
+          done
+
+          if [ "${changed}" = "true" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "matrix=[${matrix_entries}]" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log changed packages
+        run: |
+          echo "Version changes detected: ${{ steps.changed_packages.outputs.changed }}"
+          echo "Package matrix: ${{ steps.changed_packages.outputs.matrix }}"
+
+  publish:
+    name: Publish workspace packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: detect
+    if: ${{ needs.detect.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Publish to JSR
+        env:
+          DENO_NO_PROMPT: "1"
+        run: deno publish
+
+  release:
+    name: Create package releases
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - detect
+      - publish
+    if: ${{ needs.detect.outputs.changed == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release range
+        id: release_range
+        run: |
+          set -euo pipefail
+
+          current_tag="${{ matrix.package.tag }}"
+          package_tag_prefix="${{ matrix.package.key }}-v"
+          first_commit="$(git rev-list --max-parents=0 HEAD | tail -n1)"
+
+          previous_tag="$(git tag --list "${package_tag_prefix}*" --sort=-version:refname | grep -v "^${current_tag}$" | head -n1 || true)"
+          from_ref="${previous_tag:-$first_commit}"
+
+          echo "from_ref=${from_ref}" >> "$GITHUB_OUTPUT"
+          echo "current_tag=${current_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Build package changelog
+        id: package_changelog
+        uses: mikepenz/release-changelog-builder-action@v6
+        with:
+          configuration: ".github/release-changelog-config.json"
+          fromTag: ${{ steps.release_range.outputs.from_ref }}
+          toTag: ${{ github.sha }}
+          includeOnlyPaths: |
+            ${{ matrix.package.path }}/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_range.outputs.current_tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ matrix.package.name }}@${{ matrix.package.version }}
+          body: ${{ steps.package_changelog.outputs.changelog }}
