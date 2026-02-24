@@ -1,0 +1,14 @@
+{
+  "name": "panqueue-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.14.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "docs:dev": "pnpm --filter @panqueue/docs dev",
+    "docs:build": "pnpm --filter @panqueue/docs build",
+    "docs:start": "pnpm --filter @panqueue/docs start",
+    "docs:typecheck": "pnpm --filter @panqueue/docs types:check"
+  }
+}
