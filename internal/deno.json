@@ -1,0 +1,5 @@
+{
+  "name": "@panqueue/internal",
+  "version": "0.0.1",
+  "exports": "./mod.ts"
+}

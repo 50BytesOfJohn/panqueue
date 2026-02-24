@@ -1,5 +1,5 @@
 {
-  "workspace": ["./packages/client", "./packages/worker"],
+  "workspace": ["./internal", "./packages/client", "./packages/worker"],
   "tasks": {
     "version:bump": "deno run -A jsr:@deno/bump-workspaces@0.1.23/cli",
     "version:bump:dry-run": "deno run -A jsr:@deno/bump-workspaces@0.1.23/cli --dry-run",
