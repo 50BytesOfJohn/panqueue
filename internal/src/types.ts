@@ -32,7 +32,7 @@ export type JobStatus =
   | "completed"
   | "failed";
 
-/** Per-job options provided at enqueue time. */
+/** TODO: Per-job options provided at enqueue time. */
 export interface JobOptions {
   /** Number of retry attempts before moving to failed. Defaults to 0 (no retries). */
   retries?: number;
