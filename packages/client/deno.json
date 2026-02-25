@@ -2,6 +2,9 @@
   "name": "@panqueue/client",
   "version": "0.0.1",
   "exports": "./mod.ts",
+  "publish": {
+    "include": ["./mod.ts", "./src/**/*.ts", "./deno.json", "./LICENSE"]
+  },
   "imports": {
     "redis": "npm:redis@^5"
   }

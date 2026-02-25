@@ -69,6 +69,10 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
     throw new Error("Not implemented — Lua scripts required");
   }
 
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.disconnect();
+  }
+
   /** Access the underlying Redis connection (for internal/advanced use). */
   get redis(): RedisConnection {
     return this.#redis;

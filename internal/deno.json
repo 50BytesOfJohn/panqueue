@@ -1,5 +1,8 @@
 {
   "name": "@panqueue/internal",
   "version": "0.0.1",
-  "exports": "./mod.ts"
+  "exports": "./mod.ts",
+  "publish": {
+    "include": ["./mod.ts", "./src/**/*.ts", "./deno.json", "./LICENSE"]
+  }
 }

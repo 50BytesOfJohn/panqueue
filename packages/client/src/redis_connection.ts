@@ -8,6 +8,7 @@ export type RedisClient = ReturnType<typeof createClient>;
 export class RedisConnection {
   #options: ConnectionOptions;
   #client: RedisClient | null = null;
+  #connectPromise: Promise<void> | null = null;
 
   constructor(options: ConnectionOptions) {
     this.#options = options;
@@ -16,7 +17,17 @@ export class RedisConnection {
   /** Connect to Redis. Must be called before using the client. */
   async connect(): Promise<void> {
     if (this.#client) return;
+    if (this.#connectPromise) return this.#connectPromise;
 
+    this.#connectPromise = this.#doConnect();
+    try {
+      await this.#connectPromise;
+    } finally {
+      this.#connectPromise = null;
+    }
+  }
+
+  async #doConnect(): Promise<void> {
     const client = createClient(this.#buildClientOptions());
 
     client.on("error", (err: Error) => {
@@ -32,6 +43,10 @@ export class RedisConnection {
     if (!this.#client) return;
     await this.#client.disconnect();
     this.#client = null;
+  }
+
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.disconnect();
   }
 
   /** The underlying redis client. Throws if not connected. */
