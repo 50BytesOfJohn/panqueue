@@ -4,6 +4,9 @@ import type { ConnectionOptions } from "@panqueue/internal";
 /** The return type of `createClient()`. */
 export type RedisClient = ReturnType<typeof createClient>;
 
+/** @internal Exposed for test stubbing only. */
+export const _internals = { createClient };
+
 /** Thin wrapper around the `npm:redis` client for connection lifecycle management. */
 export class RedisConnection {
   #options: ConnectionOptions;
@@ -28,7 +31,7 @@ export class RedisConnection {
   }
 
   async #doConnect(): Promise<void> {
-    const client = createClient(this.#buildClientOptions());
+    const client = _internals.createClient(this.#buildClientOptions());
 
     client.on("error", (err: Error) => {
       console.error("[panqueue] Redis connection error:", err.message);
