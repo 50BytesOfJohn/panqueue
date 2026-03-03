@@ -119,19 +119,22 @@ Deno.test("disconnect() makes client inaccessible again", async () => {
   expect(() => conn.client).toThrow();
 });
 
-Deno.test("disconnect() calls disconnect on the underlying client", async () => {
-  // Arrange
-  const fakeClient = createFakeClient();
-  using _stub = stubCreateClient(fakeClient);
-  const conn = new RedisConnection("redis://localhost:6379");
-  await conn.connect();
+Deno.test(
+  "disconnect() calls disconnect on the underlying client",
+  async () => {
+    // Arrange
+    const fakeClient = createFakeClient();
+    using _stub = stubCreateClient(fakeClient);
+    const conn = new RedisConnection("redis://localhost:6379");
+    await conn.connect();
 
-  // Act
-  await conn.disconnect();
+    // Act
+    await conn.disconnect();
 
-  // Assert
-  assertSpyCalls(fakeClient.disconnect as unknown as Spy, 1);
-});
+    // Assert
+    assertSpyCalls(fakeClient.disconnect as unknown as Spy, 1);
+  },
+);
 
 Deno.test("Symbol.asyncDispose disconnects the client", async () => {
   // Arrange
@@ -206,20 +209,23 @@ Deno.test("connect() maps object options to redis client format", async () => {
   createClientStub.restore();
 });
 
-Deno.test("connect() uses default host and port when not specified", async () => {
-  // Arrange
-  const fakeClient = createFakeClient();
-  const createClientStub = stubCreateClient(fakeClient);
+Deno.test(
+  "connect() uses default host and port when not specified",
+  async () => {
+    // Arrange
+    const fakeClient = createFakeClient();
+    const createClientStub = stubCreateClient(fakeClient);
 
-  // Act
-  const conn = new RedisConnection({});
-  await conn.connect();
+    // Act
+    const conn = new RedisConnection({});
+    await conn.connect();
 
-  // Assert
-  expect(createClientStub.calls[0]?.args[0]).toEqual({
-    socket: { host: "localhost", port: 6379, tls: false },
-    password: undefined,
-    database: undefined,
-  });
-  createClientStub.restore();
-});
+	    // Assert
+	    expect(createClientStub.calls[0]?.args[0]).toEqual({
+	      socket: { host: "localhost", port: 6379 },
+	      password: undefined,
+	      database: undefined,
+	    });
+    createClientStub.restore();
+  },
+);

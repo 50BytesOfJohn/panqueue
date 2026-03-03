@@ -1,4 +1,4 @@
-import { createClient } from "redis";
+import { createClient, type RedisClientOptions } from "redis";
 import type { ConnectionOptions } from "@panqueue/internal";
 
 /** The return type of `createClient()`. */
@@ -69,20 +69,26 @@ export class RedisConnection {
     return dup;
   }
 
-  #buildClientOptions(): Parameters<typeof createClient>[0] {
+  #buildClientOptions(): RedisClientOptions {
     if (typeof this.#options === "string") {
       return { url: this.#options };
     }
 
-    const { host, port, password, db, tls } = this.#options;
+    const options = this.#options;
+
     return {
-      socket: {
-        host: host ?? "localhost",
-        port: port ?? 6379,
-        tls: tls ?? false,
-      },
-      password,
-      database: db,
-    };
+      password: options.password,
+      database: options.db,
+      socket: options.tls
+        ? {
+            host: options.host ?? "localhost",
+            port: options.port ?? 6379,
+            tls: true,
+          }
+        : {
+            host: options.host ?? "localhost",
+            port: options.port ?? 6379,
+          },
+    } satisfies RedisClientOptions;
   }
 }
