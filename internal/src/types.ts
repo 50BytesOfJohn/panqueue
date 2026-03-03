@@ -93,11 +93,12 @@ export interface JobData<T extends JsonSerializable = JsonSerializable> {
 /**
  * Redis connection configuration.
  *
- * Either a URL string (e.g. `"redis://localhost:6379"`) or an object
- * with individual connection parameters.
+ * Either a URL string (e.g. `"redis://localhost:6379"`), a `{ url }` object,
+ * or an object with individual connection parameters.
  */
 export type ConnectionOptions =
   | string
+  | { url: string }
   | {
       host?: string;
       port?: number;

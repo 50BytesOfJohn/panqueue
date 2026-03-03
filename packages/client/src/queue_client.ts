@@ -1,3 +1,4 @@
+import type { PanqueueConfig } from "@panqueue/config";
 import type {
   ConnectionOptions,
   JobOptions,
@@ -5,7 +6,22 @@ import type {
 } from "@panqueue/internal";
 import { RedisConnection } from "./redis_connection.ts";
 
-/** Options for constructing a QueueClient. */
+/** Per-queue configuration for the client-only config. */
+export interface ClientQueueConfig {
+  /** Concurrency mode for this queue. Defaults to `"auto"`. */
+  mode?: "simple" | "auto";
+}
+
+/** Client-specific configuration (for codebases that don't share a PanqueueConfig). */
+export interface QueueClientConfig<TQueues extends QueueMap> {
+  /** Redis connection configuration. */
+  redis: ConnectionOptions;
+
+  /** Per-queue settings. Keys must match `keyof TQueues`. */
+  queues: { [K in keyof TQueues]: ClientQueueConfig };
+}
+
+/** Options for constructing a QueueClient directly. */
 export interface QueueClientOptions {
   /** Redis connection configuration. */
   connection: ConnectionOptions;
@@ -77,4 +93,46 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
   get redis(): RedisConnection {
     return this.#redis;
   }
+}
+
+/**
+ * Create a type-safe QueueClient from a shared PanqueueConfig.
+ *
+ * The `TQueues` generic is inferred from the config, so queue names and
+ * payload types are automatically available on the returned client.
+ *
+ * @example
+ * ```ts
+ * import { pq } from "./panqueue.config.ts";
+ * const client = createQueueClient(pq);
+ * await client.connect();
+ * await client.enqueue("emails", { to: "a@b.com", subject: "Hi" });
+ * ```
+ */
+export function createQueueClient<TQueues extends QueueMap>(
+  config: PanqueueConfig<TQueues>,
+): QueueClient<TQueues>;
+
+/**
+ * Create a type-safe QueueClient from a client-specific config.
+ *
+ * Use this overload in distributed systems where the client has its own
+ * configuration separate from the worker. Mode defaults to `"auto"` per queue.
+ *
+ * @example
+ * ```ts
+ * const client = createQueueClient<MyQueues>({
+ *   redis: "redis://localhost:6379",
+ *   queues: { emails: {}, thumbnails: { mode: "simple" } },
+ * });
+ * ```
+ */
+export function createQueueClient<TQueues extends QueueMap>(
+  config: QueueClientConfig<TQueues>,
+): QueueClient<TQueues>;
+
+export function createQueueClient<TQueues extends QueueMap>(
+  config: PanqueueConfig<TQueues> | QueueClientConfig<TQueues>,
+): QueueClient<TQueues> {
+  return new QueueClient<TQueues>({ connection: config.redis });
 }

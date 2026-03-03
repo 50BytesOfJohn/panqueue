@@ -74,6 +74,10 @@ export class RedisConnection {
       return { url: this.#options };
     }
 
+    if ("url" in this.#options) {
+      return { url: this.#options.url };
+    }
+
     const options = this.#options;
 
     return {

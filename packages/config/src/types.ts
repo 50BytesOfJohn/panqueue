@@ -9,7 +9,7 @@ export interface QueueConfig {
 /** Configuration object returned by `definePanqueueConfig`. */
 export interface PanqueueConfig<TQueues extends QueueMap> {
   /** Redis connection configuration shared by client and worker. */
-  redis: { url: string } | ConnectionOptions;
+  redis: ConnectionOptions;
 
   /** Per-queue settings. Keys must match `keyof TQueues`. */
   queues: { [K in keyof TQueues]: QueueConfig };
