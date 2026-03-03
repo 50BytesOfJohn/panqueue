@@ -6,24 +6,38 @@ This file records rationale and dated decisions. It is not the source of truth f
 
 ### Decision
 
-- Keep package split: `@panqueue/client` and `@panqueue/worker`
-- Use typed `QueueClient<QueueMap>` as primary producer API
-- Add queue-scoped accessor (`mq.queue(queueId, defaults?)`) for per-queue defaults
-- Keep `Worker` as low-level primitive
-- Add `WorkerPool` for multi-worker coordination and shared shutdown
-- Keep "one worker = one queue" guidance
+- Three-package split: `@panqueue/config` (shared), `@panqueue/client` (producer), `@panqueue/worker` (consumer)
+- Shared configuration via `definePanqueueConfig<QueueMap>()` exported from `@panqueue/config`
+- `createQueueClient(config)` as primary producer API; queue IDs and payloads typed via the shared config
+- Queue-scoped accessor (`client.queue(queueId, defaults?)`) for per-queue defaults
+- `createWorkerPool(config, handlers)` for multi-worker coordination and shared shutdown
+- One worker per queue within the pool
 
 ### Why
 
-- Preserves strong type safety while improving ergonomics
-- Avoids per-queue connection sprawl on the producer side
-- Makes coordinated shutdown and shared defaults straightforward
-- Reinforces queue-as-workload-class, reducing head-of-line blocking issues
+- Shared config eliminates drift between producer and consumer queue definitions
+- `definePanqueueConfig` is a zero-cost identity function (no side effects, no connections) — safe to import anywhere
+- Generic parameter `QueueMap` provides full payload type safety without runtime schema dependency in v0.1
+- `queues` keys constrained to `keyof QueueMap` ensures every queue has a payload type and vice versa
+- Clean migration path: future schema support (ArkType/Zod/Valibot) replaces the generic with inferred types, no API shape change
+- Package split keeps dependency graph clean: neither client nor worker depends on the other
+- `@panqueue/config` changes rarely and caches well as a stable shared foundation
+
+### Config Scope
+
+The shared config holds what both sides must agree on: Redis connection, queue IDs, modes, keyed concurrency settings.
+
+One-sided settings stay with their respective `create*` calls:
+
+- **Client-only:** per-queue default job options (TTL, retries, delay)
+- **Worker-only:** concurrency, executor type, shutdown timeouts, handler functions
+
+Both `createQueueClient` and `createWorkerPool` accept an optional Redis override for deployments where producer and consumer connect to different endpoints.
 
 ### Deferred
 
+- Runtime schema validation (per-queue schemas replacing the generic parameter)
 - Dynamic queue names escape hatch
-- Runtime schema validation (zod/valibot)
 - BYO Redis client instance
 
 ## 2026-02-20: Inline Executor Concurrency Model (v0.1)

@@ -16,12 +16,93 @@
 3. **Adapter interface extracted, not abstracted prematurely.** Build the Redis implementation first, then derive the storage interface from real requirements. Don't design a generic interface upfront.
 4. **Deno-native DX.** TypeScript-first, no build step, published to JSR, leverages Deno-specific features where they provide real value.
 
+## Package Structure
+
+Three packages with clear dependency direction:
+
+| Package | Purpose | Depends on |
+| --- | --- | --- |
+| `@panqueue/config` | Shared queue definitions, types, `definePanqueueConfig` | — |
+| `@panqueue/client` | Producer API (`createQueueClient`) | `@panqueue/config` |
+| `@panqueue/worker` | Consumer API (`createWorkerPool`) | `@panqueue/config` |
+
+`@panqueue/config` is the shared foundation. It contains no runtime logic beyond the identity function `definePanqueueConfig` and the associated types. It changes rarely and caches well.
+
+Neither `@panqueue/client` nor `@panqueue/worker` depends on the other. A monorepo service imports `config` + `client`. A worker service imports `config` + `worker`. A single-app setup imports all three.
+
+## Shared Configuration
+
+### `definePanqueueConfig`
+
+An identity function that exists purely for type inference, inspired by TanStack's `queryOptions` pattern. It returns the config object unchanged.
+
+```ts
+type QueueMap = {
+  email: { to: string; subject: string; body: string };
+  image: { url: string; width: number };
+};
+
+export const pq = definePanqueueConfig<QueueMap>({
+  redis: { url: Deno.env.get("REDIS_URL")! },
+  queues: {
+    email: { mode: "global" },
+    image: { mode: "keyed", keyConcurrency: 2 },
+  },
+});
+```
+
+The generic parameter `QueueMap` maps queue IDs to their payload types. The `queues` keys are constrained to `keyof QueueMap` — you cannot define a queue without a payload type or vice versa.
+
+No connections are opened, no side effects occur. Importing the config file is always safe.
+
+### Type Flow
+
+Both `createQueueClient` and `createWorkerPool` accept the config object and infer the full queue map:
+
+```ts
+// producer
+const client = createQueueClient(pq);
+client.queue("email").add({ to: "a@b.com", subject: "Hi", body: "..." }); // typed
+
+// consumer
+const pool = createWorkerPool(pq, {
+  email: async (job) => { /* job.data is typed */ },
+  image: async (job) => { /* job.data is typed */ },
+});
+```
+
+### Schema Migration Path (Future)
+
+In a future version, `definePanqueueConfig` will accept per-queue schemas (e.g. ArkType, Zod, Valibot). When schemas are provided, payload types are inferred from them and the explicit generic parameter becomes unnecessary:
+
+```ts
+// future
+export const pq = definePanqueueConfig({
+  redis: { url: Deno.env.get("REDIS_URL")! },
+  queues: {
+    email: { mode: "global", schema: emailSchema },
+  },
+});
+```
+
+This is an additive change — no API shape change, just a new optional field that replaces the generic.
+
+### Config Scope
+
+The shared config holds everything both sides must agree on: Redis connection, queue IDs, modes, and keyed concurrency settings.
+
+Settings that are inherently one-sided stay with their respective `create*` calls:
+
+- **Client-only:** per-queue default job options (TTL, retries, delay)
+- **Worker-only:** concurrency, executor type, shutdown timeouts, handler functions
+
+`createQueueClient` and `createWorkerPool` may accept an optional Redis override for deployments where producer and consumer connect to different endpoints.
+
 ## API Shape (Current Direction)
 
-- **Package split:** `@panqueue/client` (producers + types) and `@panqueue/worker` (workers + executors).
-- **Typed client:** `QueueClient<QueueMap>` is the primary producer API; queue IDs are strongly typed via the app registry.
-- **Queue-scoped defaults:** `mq.queue(queueId, defaults?)` returns a lightweight queue handle for per-queue defaults with per-job overrides on `.add()`.
-- **Worker model:** `Worker` remains the low-level primitive; `WorkerPool` coordinates multiple workers and shared shutdown behavior.
+- **Typed client:** `createQueueClient(config)` is the primary producer API; queue IDs and payloads are strongly typed via the shared config.
+- **Queue-scoped defaults:** `client.queue(queueId, defaults?)` returns a lightweight queue handle for per-queue defaults with per-job overrides on `.add()`.
+- **Worker model:** `createWorkerPool(config, handlers)` coordinates multiple workers (one per queue) with shared shutdown behavior.
 - **Queue boundary:** One worker handles one queue. `queueId` should represent a workload class (to avoid head-of-line blocking).
 - **v0.1 limits:** No dynamic queue-name escape hatch and no runtime schema validation yet (JSON-serializable payload validation on enqueue only).
 
@@ -93,6 +174,7 @@ All executors must implement a two-phase shutdown: cooperative signal followed b
 - Graceful shutdown (stop claiming, drain in-flight, release locks)
 - Pub/sub worker wake-up (near-zero latency job pickup with polling fallback)
 - Inline executor only
+- Shared configuration via `definePanqueueConfig` (`@panqueue/config`)
 
 ### v0.2 — Scheduling & Workers
 
@@ -112,6 +194,7 @@ All executors must implement a two-phase shutdown: cooperative signal followed b
 
 ### Future (non-committed)
 
+- Runtime schema validation (per-queue schemas replacing the generic parameter)
 - Storage adapter interface extraction + alternative backends
 - Dashboard (separate package)
 - Cross-runtime support
