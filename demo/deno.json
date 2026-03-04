@@ -1,0 +1,5 @@
+{
+  "tasks": {
+    "demo": "deno run --allow-net enqueue_jobs.ts"
+  }
+}

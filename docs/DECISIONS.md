@@ -77,6 +77,49 @@ Use a separate queue mode with dedicated Redis structures:
 
 Re-check key readiness on every state-changing path (enqueue, completion, stalled recovery) to avoid missed scheduling wakeups.
 
+## 2026-03-03: Job Deduplication (v0.2)
+
+### Decision
+
+- Dedup key is always user-provided via `dedupId` on `.add()` — no auto-generation from payloads
+- Provide a `dedupFrom((payload) => string)` helper for explicit payload-based derivation
+- Dedup window controlled by TTL on a Redis key per dedup entry
+- Behavior on duplicate is configurable per queue: `throw` (default) or `ignore` (returns existing job ID)
+- Dedup config lives in the shared `definePanqueueConfig` under each queue's definition
+
+### Why
+
+- User-provided dedup keys are safer and more readable than magic hashing — the user decides what "duplicate" means
+- Helper utility covers the common hash-from-payload case without making it implicit
+- Redis TTL-based window is simple, self-cleaning, and requires no background sweep
+- Config-driven behavior (`throw` vs `ignore`) avoids per-call boilerplate while keeping the choice explicit
+- Atomic check in the enqueue Lua script prevents race conditions between concurrent enqueues
+
+## 2026-03-03: Job Completion Waiting (v0.1 or v0.2)
+
+### Decision
+
+Add a client-side API for awaiting job completion after enqueue. Exact API and scope TBD.
+
+### Why
+
+- Enables request-response patterns where the producer needs the job result before continuing
+- Common use case in single-app setups (e.g. API handler enqueues a job and returns the result to the HTTP client)
+- Likely backed by Redis pub/sub or polling — details to be decided when scoping
+
+## 2026-03-03: Rate Limiting as Composable Constraint (Future)
+
+### Decision
+
+Rate limiting is a separate, composable config field — not a queue mode. It can be combined with any mode (`global`, `keyed`, future `dynamic`).
+
+### Why
+
+- Modes define scheduling topology (how jobs are organized and claimed). Rate limiting is an orthogonal constraint on throughput.
+- Making rate limiting a mode would cause combinatorial explosion: `global`, `keyed`, `global-rate-limited`, `keyed-rate-limited`, etc.
+- As a composable field, the claim Lua script adds one additional check after the mode-specific logic, keeping both concerns clean
+- In keyed mode, rate limits naturally scope per key (the scheduling unit). In global mode, they scope per queue.
+
 ## 2026-02-20: Documentation Policy
 
 ### Decision

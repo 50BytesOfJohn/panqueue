@@ -116,6 +116,10 @@ waiting → delayed → active → completed
 
 All state transitions are atomic via Redis Lua scripts. No partial states, no race conditions.
 
+### Delivery Guarantee
+
+panqueue provides **at-least-once** delivery. The atomic Lua claim script ensures only one worker wins a given job at any time. However, if a worker crashes after completing work but before acknowledging completion, the stalled job sweep will requeue the job. Exactly-once semantics require idempotent handlers or external deduplication — this is the user's responsibility.
+
 ## Executor Model
 
 Three tiers of job execution, user-selectable per queue or per job type:
@@ -153,6 +157,10 @@ All job payloads must be strictly JSON-serializable (primitives, plain objects, 
 
 The stalled job detection sweep runs periodically on each consumer node. To prevent race conditions where multiple nodes attempt to requeue the same stalled job, the sweep must be a single atomic Lua script that verifies lock expiry and moves the job in one operation. Concurrent sweeps by different nodes must be harmless — each check-and-move either succeeds or no-ops.
 
+### Failed Job Metadata
+
+When a job fails (final failure, not a retriable attempt), the job's Redis hash is updated with error metadata: error message, stack trace, and failure timestamp. This data persists for operational inspection and debugging. Retriable failures store the last error on each attempt for visibility into transient issues.
+
 ### Graceful Shutdown Across Executors
 
 Shutdown behavior varies by executor tier and must be explicitly handled:
@@ -175,20 +183,51 @@ All executors must implement a two-phase shutdown: cooperative signal followed b
 - Pub/sub worker wake-up (near-zero latency job pickup with polling fallback)
 - Inline executor only
 - Shared configuration via `definePanqueueConfig` (`@panqueue/config`)
+- Failed job error persistence (message, stack, timestamp)
 
-### v0.2 — Scheduling & Workers
+### v0.1 or v0.2 — Job Completion Waiting
+
+Client-side API for awaiting a job's completion (or failure) after enqueue. Enables request-response patterns where the producer needs the result before continuing. Exact API to be decided — likely a method on the job handle returned by `.add()` (e.g. `await job.waitForCompletion()`), backed by Redis pub/sub or polling. Scoping TBD.
+
+### v0.2 — Scheduling, Workers & Deduplication
 
 - Delayed jobs
 - Repeatable/cron jobs (Redis-backed scheduler)
 - Web Worker executor with Deno permission scoping
 - Subprocess executor
 - Job progress reporting
+- Job deduplication (see below)
+
+#### Job Deduplication
+
+Opt-in deduplication prevents enqueueing a job that duplicates one already waiting or active.
+
+**Dedup key:** Always user-provided via a `dedupId` field on `.add()`. panqueue does not auto-generate dedup keys from payloads — the user decides what constitutes a duplicate. A helper utility `dedupFrom((payload) => string)` is provided for deriving dedup IDs from payloads (e.g. hashing), but calling it is always explicit.
+
+**Dedup window:** Controlled by a TTL on the dedup key in Redis. The key is set on enqueue and expires after the configured window. Within the window, a second enqueue with the same `dedupId` is rejected.
+
+**Behavior on duplicate:** Configurable per queue in the shared config:
+
+- `throw` — enqueue throws an error (default)
+- `ignore` — enqueue silently returns the existing job ID
+
+```ts
+queues: {
+  email: { mode: "global", dedup: { window: "1h", onDuplicate: "ignore" } },
+}
+```
+
+**Redis structure:** A simple key with TTL per dedup entry:
+
+    {q:<queueId>}:dedup:<dedupId> = <jobId>  (TTL = window)
+
+The enqueue Lua script checks for the dedup key atomically before inserting the job.
 
 ### v0.3 — Advanced
 
 - Priorities
 - Dead letter queues
-- Rate limiting
+- Rate limiting (composable constraint, orthogonal to queue mode — see Decisions)
 - Event streaming (Redis Streams)
 - Job flows/dependencies
 

@@ -2,6 +2,7 @@ export {
   createQueueClient,
   QueueClient,
   type ClientQueueConfig,
+  type EnqueueOptions,
   type QueueClientConfig,
   type QueueClientOptions,
 } from "./src/queue_client.ts";

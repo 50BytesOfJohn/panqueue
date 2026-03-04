@@ -18,3 +18,6 @@ export {
   queueKey,
   waitingKey,
 } from "./src/keys.ts";
+
+export { generateJobId } from "./src/job_id.ts";
+export { assertJsonSerializable } from "./src/serialization.ts";

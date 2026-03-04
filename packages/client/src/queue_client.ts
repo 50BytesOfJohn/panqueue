@@ -1,10 +1,23 @@
 import type { PanqueueConfig } from "@panqueue/config";
 import type {
   ConnectionOptions,
+  JobData,
   JobOptions,
+  JsonSerializable,
   QueueMap,
 } from "@panqueue/internal";
+import {
+  assertJsonSerializable,
+  generateJobId,
+  jobsKey,
+  notifyKey,
+  waitingKey,
+} from "@panqueue/internal";
 import { RedisConnection } from "./redis_connection.ts";
+import { ENQUEUE_SCRIPT } from "./lua/enqueue.ts";
+
+/** Options for enqueuing a job. */
+export type EnqueueOptions = JobOptions;
 
 /** Per-queue configuration for the client-only config. */
 export interface ClientQueueConfig {
@@ -41,7 +54,6 @@ export interface QueueClientOptions {
  *   connection: "redis://localhost:6379",
  * });
  *
- * await mq.connect();
  * await mq.enqueue("emails", { to: "a@b.com", subject: "Hello" });
  * await mq.disconnect();
  * ```
@@ -53,7 +65,12 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
     this.#redis = new RedisConnection(options.connection);
   }
 
-  /** Connect to Redis. Must be called before enqueuing jobs. */
+  /**
+   * Explicitly connect to Redis.
+   *
+   * Not required — the client connects lazily on the first `enqueue` call.
+   * Use this if you want to verify connectivity at startup.
+   */
   async connect(): Promise<void> {
     await this.#redis.connect();
   }
@@ -69,20 +86,38 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
    * The queue name is type-checked against the QueueMap generic, and the
    * payload must match the type declared for that queue.
    *
-   * Implementation will be completed with Lua scripts in a subsequent PR.
+   * @returns The job ID.
    */
   async enqueue<K extends keyof TQueues & string>(
-    _queueId: K,
-    _data: TQueues[K],
-    _options?: JobOptions,
-  ): Promise<void> {
-    // TODO: Implement via Lua script (addJob)
-    // This will atomically:
-    // 1. Generate a job ID
-    // 2. Store the job data in the jobs hash
-    // 3. Push the job ID to the waiting list (or delayed sorted set)
-    // 4. Publish a notification on the notify channel
-    throw new Error("Not implemented — Lua scripts required");
+    queueId: K,
+    data: TQueues[K],
+    options?: EnqueueOptions,
+  ): Promise<string> {
+    assertJsonSerializable(data);
+
+    const jobId = options?.jobId ?? generateJobId();
+
+    const jobData: JobData<TQueues[K]> = {
+      id: jobId,
+      queueId,
+      data,
+      status: "waiting",
+      attempts: 0,
+      maxRetries: options?.retries ?? 0,
+      backoff: options?.backoff,
+      createdAt: Date.now(),
+    };
+
+    const serialized = JSON.stringify(jobData);
+
+    await this.#redis.connect();
+
+    await this.#redis.client.eval(ENQUEUE_SCRIPT, {
+      keys: [jobsKey(queueId), waitingKey(queueId), notifyKey(queueId)],
+      arguments: [jobId, serialized],
+    });
+
+    return jobId;
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
@@ -105,7 +140,6 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
  * ```ts
  * import { pq } from "./panqueue.config.ts";
  * const client = createQueueClient(pq);
- * await client.connect();
  * await client.enqueue("emails", { to: "a@b.com", subject: "Hi" });
  * ```
  */
