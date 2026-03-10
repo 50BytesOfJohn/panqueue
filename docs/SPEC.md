@@ -202,9 +202,11 @@ Client-side API for awaiting a job's completion (or failure) after enqueue. Enab
 
 Opt-in deduplication prevents enqueueing a job that duplicates one already waiting or active.
 
-**Dedup key:** Always user-provided via a `dedupId` field on `.add()`. panqueue does not auto-generate dedup keys from payloads — the user decides what constitutes a duplicate. A helper utility `dedupFrom((payload) => string)` is provided for deriving dedup IDs from payloads (e.g. hashing), but calling it is always explicit.
+**Dedup key:** Always user-provided via a separate deduplication/idempotency field on `.add()`. The final field name is still TBD. panqueue does not auto-generate dedup keys from payloads, because the user decides what constitutes a duplicate. A helper utility `dedupFrom((payload) => string)` is provided for deriving dedup keys from payloads (e.g. hashing), but calling it is always explicit.
 
-**Dedup window:** Controlled by a TTL on the dedup key in Redis. The key is set on enqueue and expires after the configured window. Within the window, a second enqueue with the same `dedupId` is rejected.
+**Job identity:** `jobId` remains the identity of a concrete queue entry. It is distinct from the future deduplication/idempotency key and should not carry dedupe semantics.
+
+**Dedup window:** Controlled by a TTL on the dedup key in Redis. The key is set on enqueue and expires after the configured window. Within the window, a second enqueue with the same dedup key is rejected.
 
 **Behavior on duplicate:** Configurable per queue in the shared config:
 
@@ -219,7 +221,7 @@ queues: {
 
 **Redis structure:** A simple key with TTL per dedup entry:
 
-    {q:<queueId>}:dedup:<dedupId> = <jobId>  (TTL = window)
+    {q:<queueId>}:dedup:<dedup-key> = <jobId>  (TTL = window)
 
 The enqueue Lua script checks for the dedup key atomically before inserting the job.
 

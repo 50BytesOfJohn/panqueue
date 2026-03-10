@@ -81,7 +81,7 @@ Re-check key readiness on every state-changing path (enqueue, completion, stalle
 
 ### Decision
 
-- Dedup key is always user-provided via `dedupId` on `.add()` — no auto-generation from payloads
+- Deduplication/idempotency uses a separate user-provided key on `.add()`; the exact field name is still TBD
 - Provide a `dedupFrom((payload) => string)` helper for explicit payload-based derivation
 - Dedup window controlled by TTL on a Redis key per dedup entry
 - Behavior on duplicate is configurable per queue: `throw` (default) or `ignore` (returns existing job ID)
@@ -90,6 +90,7 @@ Re-check key readiness on every state-changing path (enqueue, completion, stalle
 ### Why
 
 - User-provided dedup keys are safer and more readable than magic hashing — the user decides what "duplicate" means
+- Keeping deduplication separate from `jobId` preserves job identity and avoids collisions between dedupe and record identity
 - Helper utility covers the common hash-from-payload case without making it implicit
 - Redis TTL-based window is simple, self-cleaning, and requires no background sweep
 - Config-driven behavior (`throw` vs `ignore`) avoids per-call boilerplate while keeping the choice explicit

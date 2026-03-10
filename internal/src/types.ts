@@ -47,7 +47,7 @@ export interface JobOptions {
   /** Delay in milliseconds before the job becomes available for processing. */
   delay?: number;
 
-  /** Optional idempotency/deduplication key. */
+  /** Optional caller-supplied job ID. Must identify a concrete job, not deduplication intent. */
   jobId?: string;
 }
 
