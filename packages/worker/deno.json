@@ -2,6 +2,9 @@
   "name": "@panqueue/worker",
   "version": "0.0.1",
   "exports": "./mod.ts",
+  "imports": {
+    "redis": "npm:redis@^5"
+  },
   "publish": {
     "include": ["./mod.ts", "./src/**/*.ts", "./deno.json", "./LICENSE"]
   }

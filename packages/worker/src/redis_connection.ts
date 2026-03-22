@@ -1,0 +1,102 @@
+import { createClient, type RedisClientOptions, type RedisClientType } from "redis";
+import type { ConnectionOptions } from "@panqueue/internal";
+import { WORKER_SCRIPTS } from "./scripts.ts";
+
+/** Redis client type with worker scripts registered. */
+export type RedisClient = RedisClientType<{}, {}, typeof WORKER_SCRIPTS>;
+
+/** @internal Exposed for test stubbing only. */
+export const _internals = { createClient };
+
+/** Thin wrapper around the `npm:redis` client for connection lifecycle management. */
+export class RedisConnection {
+  #options: ConnectionOptions;
+  #client: RedisClient | null = null;
+  #connectPromise: Promise<void> | null = null;
+
+  constructor(options: ConnectionOptions) {
+    this.#options = options;
+  }
+
+  /** Connect to Redis. Must be called before using the client. */
+  async connect(): Promise<void> {
+    if (this.#client) return;
+    if (this.#connectPromise) return this.#connectPromise;
+
+    this.#connectPromise = this.#doConnect();
+    try {
+      await this.#connectPromise;
+    } finally {
+      this.#connectPromise = null;
+    }
+  }
+
+  async #doConnect(): Promise<void> {
+    const client = _internals.createClient({
+      ...this.#buildClientOptions(),
+      scripts: WORKER_SCRIPTS,
+    });
+
+    client.on("error", (err: Error) => {
+      console.error("[panqueue] Redis connection error:", err.message);
+    });
+
+    await client.connect();
+    this.#client = client as RedisClient;
+  }
+
+  /** Gracefully disconnect from Redis. */
+  async disconnect(): Promise<void> {
+    if (!this.#client) return;
+    await this.#client.disconnect();
+    this.#client = null;
+  }
+
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.disconnect();
+  }
+
+  /** The underlying redis client. Throws if not connected. */
+  get client(): RedisClient {
+    if (!this.#client) {
+      throw new Error(
+        "[panqueue] Redis client is not connected. Call connect() first.",
+      );
+    }
+    return this.#client;
+  }
+
+  /** Create a duplicate connection (e.g. for pub/sub). */
+  async duplicate(): Promise<RedisConnection> {
+    const dup = new RedisConnection(this.#options);
+    await dup.connect();
+    return dup;
+  }
+
+  #buildClientOptions(): RedisClientOptions {
+    if (typeof this.#options === "string") {
+      return { url: this.#options };
+    }
+
+    if ("url" in this.#options) {
+      return { url: this.#options.url };
+    }
+
+    const options = this.#options;
+
+    return {
+      password: options.password,
+      database: options.db,
+      socket: options.tls
+        ? {
+            host: options.host ?? "localhost",
+            port: options.port ?? 6379,
+            tls: true,
+          }
+        : {
+            host: options.host ?? "localhost",
+            port: options.port ?? 6379,
+          },
+    } satisfies RedisClientOptions;
+  }
+}

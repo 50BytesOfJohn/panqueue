@@ -95,6 +95,11 @@
         "dependencies": [
           "npm:redis@5"
         ]
+      },
+      "packages/worker": {
+        "dependencies": [
+          "npm:redis@5"
+        ]
       }
     }
   }
