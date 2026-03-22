@@ -1,0 +1,11 @@
+{
+  "name": "panqueue-bullmq-benchmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node load_test.js"
+  },
+  "dependencies": {
+    "bullmq": "^5"
+  }
+}
