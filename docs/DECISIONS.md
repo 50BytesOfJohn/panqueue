@@ -2,9 +2,57 @@
 
 This file records rationale and dated decisions. It is not the source of truth for behavior; `SPEC.md` is authoritative.
 
+## 2026-03-21: Worker Lifecycle State Machine, Event Handlers & Structured Shutdown
+
+### Decision
+
+- Replace implicit boolean state (`#running`, `#stopping`) with an explicit `WorkerState` type: `"idle" | "starting" | "running" | "stopping" | "stopped" | "failed"`
+- Add `WorkerEventHandlers` interface (`onJobStart`, `onJobComplete`, `onJobFail`, `onError`, `onStateChange`) as an optional `events` field on `WorkerOptions`
+- Change `shutdown()` return type from `Promise<void>` to `Promise<ShutdownResult>` with `{ timedOut: boolean; unfinishedJobs: number }`
+
+### Why
+
+- The worker's lifecycle was already an implicit state machine with combinations of booleans and promises. Making it explicit simplifies reasoning and enables future features (WorkerPool, pause/resume, health reporting, force shutdown)
+- Direct `console.error`/`console.warn` calls are acceptable for prototyping but not for a library. Event handlers allow users to plug in their own logger, suppress noise, or integrate with observability tools. Default behavior falls back to `console.error` to avoid silent failures
+- Shutdown returning `void` forces callers to rely on logs. A structured result lets pools, CLIs, and orchestration layers react programmatically (e.g., force-kill on timeout, alert on unfinished jobs)
+
+### Deferred
+
+- **Worker config/session split**: The state machine clarifies where the session boundary belongs. Splitting `Worker` into config + per-run session will be done once the state machine is proven in practice
+- **Claimed-job/lease abstraction**: Current direct `complete()`/`fail()` on the scheduler works. A `ClaimedJob` wrapper with `complete()`, `fail()`, `extendLock()` will be introduced alongside lock renewal and stalled detection
+- **Integration tests against real Redis**: Important but orthogonal. Will be a separate effort
+
+## 2026-03-10: Class-Based API & Three-Tier Worker Design
+
+### Decision
+
+- All public APIs use classes: `QueueClient`, `Worker`, `WorkerPool`
+- `Worker` constructor uses positional args for queue name and processor, trailing options object for config: `new Worker(queueName, processor, options?)`
+- When using shared config, it becomes the first argument: `new Worker(config, queueName, processor, options?)`
+- Three tiers of worker definition: standalone (no shared config), shared-config (with optional overrides), and pool shorthand (inline processors only)
+- `WorkerPool` accepts both inline processor functions and pre-built `Worker` instances in its handler map
+
+### Why
+
+- `QueueClient` was already class-based (`new QueueClient(...)`), so `Worker` and `WorkerPool` follow the same pattern for consistency
+- Positional args for queue name and processor keep the two universal, required concerns prominent and readable — they exist on every worker
+- Trailing options object holds situational settings (concurrency, connection overrides, shutdown timeouts) that vary per deployment
+- Three tiers map to real deployment topologies: standalone workers for microservices, shared-config workers for modular monorepos, pool shorthand for single-app setups
+- Pre-built workers in the pool preserve coordinated shutdown/health without forcing all workers into the same config
+- The options object is the natural extension point for future settings — no risk of running out of positional args
+
+### Pool + Pre-Built Worker Rules
+
+- Pool validates that a pre-built worker's queue ID matches its handler map key (mismatch = startup error)
+- Pre-built worker's own config always wins (pool does not override connection or concurrency)
+- Pool owns lifecycle: `pool.shutdown()` shuts down all workers including pre-built ones
+- Detection of worker instances vs inline functions uses a branded symbol (`Symbol.for("panqueue.worker")`)
+
 ## 2026-02-20: v0.1 API Direction
 
 ### Decision
+
+> **Note:** The API surface (factory functions) described here has been superseded by the 2026-03-10 decision (class-based API with three-tier worker design). The package split, shared config pattern, and config scope decisions below remain current.
 
 - Three-package split: `@panqueue/config` (shared), `@panqueue/client` (producer), `@panqueue/worker` (consumer)
 - Shared configuration via `definePanqueueConfig<QueueMap>()` exported from `@panqueue/config`

@@ -23,8 +23,8 @@ Three packages with clear dependency direction:
 | Package | Purpose | Depends on |
 | --- | --- | --- |
 | `@panqueue/config` | Shared queue definitions, types, `definePanqueueConfig` | — |
-| `@panqueue/client` | Producer API (`createQueueClient`) | `@panqueue/config` |
-| `@panqueue/worker` | Consumer API (`createWorkerPool`) | `@panqueue/config` |
+| `@panqueue/client` | Producer API (`QueueClient`) | `@panqueue/config` |
+| `@panqueue/worker` | Consumer API (`Worker`, `WorkerPool`) | `@panqueue/config` |
 
 `@panqueue/config` is the shared foundation. It contains no runtime logic beyond the identity function `definePanqueueConfig` and the associated types. It changes rarely and caches well.
 
@@ -57,15 +57,15 @@ No connections are opened, no side effects occur. Importing the config file is a
 
 ### Type Flow
 
-Both `createQueueClient` and `createWorkerPool` accept the config object and infer the full queue map:
+`QueueClient` and `Worker` / `WorkerPool` accept the config object and infer the full queue map:
 
 ```ts
 // producer
-const client = createQueueClient(pq);
+const client = new QueueClient(pq);
 client.queue("email").add({ to: "a@b.com", subject: "Hi", body: "..." }); // typed
 
-// consumer
-const pool = createWorkerPool(pq, {
+// consumer — worker pool shorthand
+const pool = new WorkerPool(pq, {
   email: async (job) => { /* job.data is typed */ },
   image: async (job) => { /* job.data is typed */ },
 });
@@ -91,20 +91,108 @@ This is an additive change — no API shape change, just a new optional field th
 
 The shared config holds everything both sides must agree on: Redis connection, queue IDs, modes, and keyed concurrency settings.
 
-Settings that are inherently one-sided stay with their respective `create*` calls:
+Settings that are inherently one-sided stay with their respective constructors:
 
 - **Client-only:** per-queue default job options (TTL, retries, delay)
 - **Worker-only:** concurrency, executor type, shutdown timeouts, handler functions
 
-`createQueueClient` and `createWorkerPool` may accept an optional Redis override for deployments where producer and consumer connect to different endpoints.
+`QueueClient`, `Worker`, and `WorkerPool` may accept an optional Redis override for deployments where producer and consumer connect to different endpoints.
 
 ## API Shape (Current Direction)
 
-- **Typed client:** `createQueueClient(config)` is the primary producer API; queue IDs and payloads are strongly typed via the shared config.
-- **Queue-scoped defaults:** `client.queue(queueId, defaults?)` returns a lightweight queue handle for per-queue defaults with per-job overrides on `.add()`.
-- **Worker model:** `createWorkerPool(config, handlers)` coordinates multiple workers (one per queue) with shared shutdown behavior.
-- **Queue boundary:** One worker handles one queue. `queueId` should represent a workload class (to avoid head-of-line blocking).
-- **v0.1 limits:** No dynamic queue-name escape hatch and no runtime schema validation yet (JSON-serializable payload validation on enqueue only).
+### Client
+
+`QueueClient` is the producer API. Queue IDs and payloads are strongly typed via the shared config or an explicit generic.
+
+```ts
+// with shared config
+const client = new QueueClient(pq);
+
+// standalone (no shared config)
+const client = new QueueClient<DemoQueues>({
+  connection: { host: "localhost", port: 6399 },
+});
+```
+
+`client.queue(queueId, defaults?)` returns a lightweight queue handle for per-queue defaults with per-job overrides on `.add()`.
+
+### Worker
+
+`Worker` is the consumer unit — one worker processes one queue. The constructor takes the queue name and processor as positional arguments, with an options object for configuration. This keeps the two universal concerns (which queue, what to do) prominent and positional, while situational settings go in the trailing options bag.
+
+Three tiers of worker definition, from most explicit to most convenient:
+
+#### Tier 1 — Standalone Worker (no shared config)
+
+Full self-contained unit. All configuration is provided directly. Type safety comes from an explicit generic. Use this when the worker runs in a separate process, connects to a different Redis, or doesn't share a config with the producer.
+
+```ts
+const worker = new Worker<DemoQueues>("email", async (job) => {
+  // job.data typed as DemoQueues["email"]
+}, {
+  connection: { host: "localhost", port: 6399 },
+  concurrency: 5,
+});
+```
+
+#### Tier 2 — Worker with shared config (cherry-pick + override)
+
+Gets Redis, queue definition, and defaults from the shared config. Worker-specific settings can be overridden in the trailing options. Full type safety inferred from the config's `QueueMap`. Use this when you want the worker in its own file but still tied to the shared config.
+
+```ts
+const worker = new Worker(pq, "email", async (job) => {
+  // job.data typed from shared config
+}, {
+  concurrency: 10, // override shared config default
+});
+```
+
+The options object is optional when the shared config provides everything:
+
+```ts
+// common case — config provides all settings
+const worker = new Worker(pq, "email", async (job) => { ... });
+```
+
+#### Tier 3 — WorkerPool shorthand
+
+Maximum convenience for single-app setups. All config from shared config, you just supply processors inline. One worker per queue, shared shutdown.
+
+```ts
+const pool = new WorkerPool(pq, {
+  email: async (job) => { ... },
+  image: async (job) => { ... },
+});
+```
+
+#### Mixing tiers — pre-built workers in a pool
+
+`WorkerPool` also accepts pre-built `Worker` instances alongside inline processors. This lets you use custom per-worker config while still getting coordinated shutdown and health checks from the pool.
+
+```ts
+const emailWorker = new Worker(pq, "email", async (job) => { ... }, {
+  concurrency: 10,
+});
+
+const pool = new WorkerPool(pq, {
+  email: emailWorker,                     // pre-built instance
+  image: async (job) => { ... },          // inline shorthand
+});
+```
+
+When a pre-built worker is passed to the pool:
+
+- The pool validates that the worker's queue ID matches the handler map key. A mismatch is a startup error.
+- The worker's own config wins — the pool does not override connection or concurrency settings on pre-built workers.
+- The pool owns the lifecycle. Calling `pool.shutdown()` shuts down all workers, including pre-built ones. Users should not call `shutdown()` separately on workers managed by a pool.
+
+### Queue boundary
+
+One worker handles one queue. `queueId` should represent a workload class (to avoid head-of-line blocking).
+
+### v0.1 limits
+
+No dynamic queue-name escape hatch and no runtime schema validation yet (JSON-serializable payload validation on enqueue only).
 
 ## Job State Machine
 
@@ -183,6 +271,8 @@ All executors must implement a two-phase shutdown: cooperative signal followed b
 - Pub/sub worker wake-up (near-zero latency job pickup with polling fallback)
 - Inline executor only
 - Shared configuration via `definePanqueueConfig` (`@panqueue/config`)
+- Class-based client (`QueueClient`) and consumer (`Worker`, `WorkerPool`) APIs
+- Three-tier worker definition: standalone, shared-config, and pool shorthand
 - Failed job error persistence (message, stack, timestamp)
 
 ### v0.1 or v0.2 — Job Completion Waiting
