@@ -14,7 +14,6 @@ import {
   waitingKey,
 } from "@panqueue/internal";
 import { RedisConnection } from "./redis_connection.ts";
-import { ENQUEUE_SCRIPT } from "./lua/enqueue.ts";
 
 /** Options for enqueuing a job. */
 export type EnqueueOptions = JobOptions;
@@ -22,7 +21,7 @@ export type EnqueueOptions = JobOptions;
 /** Per-queue configuration for the client-only config. */
 export interface ClientQueueConfig {
   /** Concurrency mode for this queue. Defaults to `"auto"`. */
-  mode?: "simple" | "auto";
+  mode?: "global" | "auto";
 }
 
 /** Client-specific configuration (for codebases that don't share a PanqueueConfig). */
@@ -95,6 +94,13 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
   ): Promise<string> {
     assertJsonSerializable(data);
 
+    if (options?.backoff) {
+      throw new Error(
+        "[panqueue] Backoff is not yet supported and will be available when delayed retry " +
+        "scheduling is implemented. Remove the backoff option to enqueue.",
+      );
+    }
+
     const jobId = options?.jobId ?? generateJobId();
 
     const jobData: JobData<TQueues[K]> = {
@@ -104,7 +110,6 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
       status: "waiting",
       attempts: 0,
       maxRetries: options?.retries ?? 0,
-      backoff: options?.backoff,
       createdAt: Date.now(),
     };
 
@@ -112,10 +117,13 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
 
     await this.#redis.connect();
 
-    await this.#redis.client.eval(ENQUEUE_SCRIPT, {
-      keys: [jobsKey(queueId), waitingKey(queueId), notifyKey(queueId)],
-      arguments: [jobId, serialized],
-    });
+    await this.#redis.client.enqueue(
+      jobsKey(queueId),
+      waitingKey(queueId),
+      notifyKey(queueId),
+      jobId,
+      serialized,
+    );
 
     return jobId;
   }
@@ -157,7 +165,7 @@ export function createQueueClient<TQueues extends QueueMap>(
  * ```ts
  * const client = createQueueClient<MyQueues>({
  *   redis: "redis://localhost:6379",
- *   queues: { emails: {}, thumbnails: { mode: "simple" } },
+ *   queues: { emails: {}, thumbnails: { mode: "global" } },
  * });
  * ```
  */

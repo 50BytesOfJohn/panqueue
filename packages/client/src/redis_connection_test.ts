@@ -180,8 +180,11 @@ Deno.test("connect() passes URL string to createClient", async () => {
   const conn = new RedisConnection(url);
   await conn.connect();
 
-  // Assert
-  expect(createClientStub.calls[0]?.args[0]).toEqual({ url });
+  // Assert — options include scripts + connection config
+  // deno-lint-ignore no-explicit-any
+  const opts = createClientStub.calls[0]!.args[0] as any;
+  expect(opts.url).toBe(url);
+  expect(opts.scripts).toBeDefined();
   createClientStub.restore();
 });
 
@@ -200,12 +203,13 @@ Deno.test("connect() maps object options to redis client format", async () => {
   });
   await conn.connect();
 
-  // Assert
-  expect(createClientStub.calls[0]?.args[0]).toEqual({
-    socket: { host: "myhost", port: 6380, tls: true },
-    password: "secret",
-    database: 2,
-  });
+  // Assert — options include scripts + connection config
+  // deno-lint-ignore no-explicit-any
+  const opts = createClientStub.calls[0]!.args[0] as any;
+  expect(opts.socket).toEqual({ host: "myhost", port: 6380, tls: true });
+  expect(opts.password).toBe("secret");
+  expect(opts.database).toBe(2);
+  expect(opts.scripts).toBeDefined();
   createClientStub.restore();
 });
 
@@ -220,12 +224,13 @@ Deno.test(
     const conn = new RedisConnection({});
     await conn.connect();
 
-	    // Assert
-	    expect(createClientStub.calls[0]?.args[0]).toEqual({
-	      socket: { host: "localhost", port: 6379 },
-	      password: undefined,
-	      database: undefined,
-	    });
+    // Assert — options include scripts + connection config
+    // deno-lint-ignore no-explicit-any
+    const opts = createClientStub.calls[0]!.args[0] as any;
+    expect(opts.socket).toEqual({ host: "localhost", port: 6379 });
+    expect(opts.password).toBeUndefined();
+    expect(opts.database).toBeUndefined();
+    expect(opts.scripts).toBeDefined();
     createClientStub.restore();
   },
 );

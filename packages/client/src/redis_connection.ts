@@ -1,8 +1,9 @@
-import { createClient, type RedisClientOptions } from "redis";
+import { createClient, type RedisClientOptions, type RedisClientType } from "redis";
 import type { ConnectionOptions } from "@panqueue/internal";
+import { CLIENT_SCRIPTS } from "./scripts.ts";
 
-/** The return type of `createClient()`. */
-export type RedisClient = ReturnType<typeof createClient>;
+/** Redis client type with client scripts registered. */
+export type RedisClient = RedisClientType<{}, {}, typeof CLIENT_SCRIPTS>;
 
 /** @internal Exposed for test stubbing only. */
 export const _internals = { createClient };
@@ -31,14 +32,17 @@ export class RedisConnection {
   }
 
   async #doConnect(): Promise<void> {
-    const client = _internals.createClient(this.#buildClientOptions());
+    const client = _internals.createClient({
+      ...this.#buildClientOptions(),
+      scripts: CLIENT_SCRIPTS,
+    });
 
     client.on("error", (err: Error) => {
       console.error("[panqueue] Redis connection error:", err.message);
     });
 
     await client.connect();
-    this.#client = client;
+    this.#client = client as RedisClient;
   }
 
   /** Gracefully disconnect from Redis. */
