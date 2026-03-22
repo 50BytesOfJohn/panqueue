@@ -2,6 +2,31 @@
 
 This file records rationale and dated decisions. It is not the source of truth for behavior; `SPEC.md` is authoritative.
 
+## 2026-03-22: Pay-for-What-You-Use Lua Scripts & EVALSHA Caching
+
+### Decision
+
+- Each feature's Redis cost is additive: the base enqueue path is 3 ops (HSET + LPUSH + PUBLISH). Optional features (delays, priorities, rate limiting) add ops only when enabled on a queue.
+- All Lua scripts use `defineScript` from node-redis v5, registered via `createClient({ scripts })`. Scripts are hardcoded per package (client scripts, worker scripts) — not configurable.
+- The framework automatically uses EVALSHA (40-byte SHA1 hash) instead of sending full script text on every call. First invocation per script falls back to EVAL; all subsequent calls use the cached hash.
+
+### Why
+
+- BullMQ runs ~15+ Redis ops per enqueue unconditionally to maintain indexes for priorities, delays, rate limiting, and dependencies — even when unused. Our 3-op base path benchmarks at **2.3x faster enqueue** than BullMQ, which matters because enqueue is in the client-facing hot path (API handlers, webhooks).
+- Processing speed (background, user-invisible) is secondary. Users don't feel the difference between 103ms and 106ms on a background email send.
+- EVALSHA eliminates repeated script transmission. With 2 evals per job at scale, this saves bandwidth to Redis proportional to script size × throughput.
+- Scripts as fixed internals (not constructor params) keeps the API surface clean and avoids accidental misconfiguration.
+
+### Benchmark (local Docker Redis, port 6399)
+
+| Metric | Panqueue | BullMQ |
+|---|---|---|
+| Enqueue throughput | ~47,000 jobs/s | ~20,000 jobs/s |
+| Process throughput (no-op, c=50) | ~4,400 jobs/s | ~15,000 jobs/s |
+| Overhead per job | ~0.16ms | ~0.04ms |
+
+Processing gap is due to ioredis command pipelining in BullMQ — a known future optimization for Panqueue.
+
 ## 2026-03-21: Worker Lifecycle State Machine, Event Handlers & Structured Shutdown
 
 ### Decision
