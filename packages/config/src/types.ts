@@ -3,7 +3,7 @@ import type { ConnectionOptions, QueueMap } from "@panqueue/internal";
 /** Per-queue configuration within the shared config. */
 export interface QueueConfig {
   /** Concurrency mode for this queue. */
-  mode: "simple";
+  mode: "global";
 }
 
 /** Configuration object returned by `definePanqueueConfig`. */

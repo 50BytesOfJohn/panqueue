@@ -20,8 +20,8 @@ import type { PanqueueConfig } from "./types.ts";
  * export const pq = definePanqueueConfig<MyQueues>({
  *   redis: { url: Deno.env.get("REDIS_URL")! },
  *   queues: {
- *     email: { mode: "simple" },
- *     image: { mode: "simple" },
+ *     email: { mode: "global" },
+ *     image: { mode: "global" },
  *   },
  * });
  * ```

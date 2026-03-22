@@ -10,8 +10,8 @@ Deno.test("definePanqueueConfig returns the config unchanged", () => {
   const input = {
     redis: { url: "redis://localhost:6379" },
     queues: {
-      email: { mode: "simple" as const },
-      image: { mode: "simple" as const },
+      email: { mode: "global" as const },
+      image: { mode: "global" as const },
     },
   };
 
@@ -25,8 +25,8 @@ Deno.test("definePanqueueConfig accepts ConnectionOptions string", () => {
   const result = definePanqueueConfig<TestQueues>({
     redis: "redis://localhost:6379",
     queues: {
-      email: { mode: "simple" },
-      image: { mode: "simple" },
+      email: { mode: "global" },
+      image: { mode: "global" },
     },
   });
 
@@ -37,8 +37,8 @@ Deno.test("definePanqueueConfig accepts ConnectionOptions object", () => {
   const result = definePanqueueConfig<TestQueues>({
     redis: { host: "localhost", port: 6379 },
     queues: {
-      email: { mode: "simple" },
-      image: { mode: "simple" },
+      email: { mode: "global" },
+      image: { mode: "global" },
     },
   });
 
