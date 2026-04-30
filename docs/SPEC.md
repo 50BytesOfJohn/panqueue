@@ -1,6 +1,7 @@
 # panqueue — Library Specification
 
-> BullMQ-inspired job queue library for Deno. Redis-backed, self-hosted, no cloud dependencies.
+> BullMQ-inspired job queue library for Deno. Redis-backed, self-hosted, no
+> cloud dependencies.
 
 ## Scope
 
@@ -11,30 +12,43 @@
 
 ## Core Principles
 
-1. **Redis is the single source of truth.** All job state, scheduling, metadata, and results live in Redis. No secondary stores.
-2. **No cloud coupling.** The library assumes nothing about hosting. A Deno Docker container and a Redis URL is the entire infrastructure contract.
-3. **Adapter interface extracted, not abstracted prematurely.** Build the Redis implementation first, then derive the storage interface from real requirements. Don't design a generic interface upfront.
-4. **Deno-native DX.** TypeScript-first, no build step, published to JSR, leverages Deno-specific features where they provide real value.
+1. **Redis is the single source of truth.** All job state, scheduling, metadata,
+   and results live in Redis. No secondary stores.
+2. **No cloud coupling.** The library assumes nothing about hosting. A Deno
+   Docker container and a Redis URL is the entire infrastructure contract.
+3. **Adapter interface extracted, not abstracted prematurely.** Build the Redis
+   implementation first, then derive the storage interface from real
+   requirements. Don't design a generic interface upfront.
+4. **Deno-native DX.** TypeScript-first, no build step, published to JSR,
+   leverages Deno-specific features where they provide real value.
+5. **Alpha label, production-quality core.** v0.1 may be advertised as alpha
+   while the API settles, but the storage and delivery semantics should be
+   correct enough for real workloads.
 
 ## Package Structure
 
 Three packages with clear dependency direction:
 
-| Package | Purpose | Depends on |
-| --- | --- | --- |
-| `@panqueue/config` | Shared queue definitions, types, `definePanqueueConfig` | — |
-| `@panqueue/client` | Producer API (`QueueClient`) | `@panqueue/config` |
-| `@panqueue/worker` | Consumer API (`Worker`, `WorkerPool`) | `@panqueue/config` |
+| Package            | Purpose                                                 | Depends on         |
+| ------------------ | ------------------------------------------------------- | ------------------ |
+| `@panqueue/config` | Shared queue definitions, types, `definePanqueueConfig` | —                  |
+| `@panqueue/client` | Producer API (`QueueClient`)                            | `@panqueue/config` |
+| `@panqueue/worker` | Consumer API (`Worker`, `WorkerPool`)                   | `@panqueue/config` |
 
-`@panqueue/config` is the shared foundation. It contains no runtime logic beyond the identity function `definePanqueueConfig` and the associated types. It changes rarely and caches well.
+`@panqueue/config` is the shared foundation. It contains no runtime logic beyond
+the identity function `definePanqueueConfig` and the associated types. It
+changes rarely and caches well.
 
-Neither `@panqueue/client` nor `@panqueue/worker` depends on the other. A monorepo service imports `config` + `client`. A worker service imports `config` + `worker`. A single-app setup imports all three.
+Neither `@panqueue/client` nor `@panqueue/worker` depends on the other. A
+monorepo service imports `config` + `client`. A worker service imports
+`config` + `worker`. A single-app setup imports all three.
 
 ## Shared Configuration
 
 ### `definePanqueueConfig`
 
-An identity function that exists purely for type inference, inspired by TanStack's `queryOptions` pattern. It returns the config object unchanged.
+An identity function that exists purely for type inference, inspired by
+TanStack's `queryOptions` pattern. It returns the config object unchanged.
 
 ```ts
 type QueueMap = {
@@ -46,34 +60,39 @@ export const pq = definePanqueueConfig<QueueMap>({
   redis: { url: Deno.env.get("REDIS_URL")! },
   queues: {
     email: { mode: "global" },
-    image: { mode: "keyed", keyConcurrency: 2 },
+    image: { mode: "global" },
   },
 });
 ```
 
-The generic parameter `QueueMap` maps queue IDs to their payload types. The `queues` keys are constrained to `keyof QueueMap` — you cannot define a queue without a payload type or vice versa.
+The generic parameter `QueueMap` maps queue IDs to their payload types. The
+`queues` keys are constrained to `keyof QueueMap` — you cannot define a queue
+without a payload type or vice versa.
 
-No connections are opened, no side effects occur. Importing the config file is always safe.
+No connections are opened, no side effects occur. Importing the config file is
+always safe.
 
 ### Type Flow
 
-`QueueClient` and `Worker` / `WorkerPool` accept the config object and infer the full queue map:
+`QueueClient` and `Worker` accept the config object and infer the full queue
+map:
 
 ```ts
 // producer
-const client = new QueueClient(pq);
-client.queue("email").add({ to: "a@b.com", subject: "Hi", body: "..." }); // typed
+const client = createQueueClient(pq);
+await client.enqueue("email", { to: "a@b.com", subject: "Hi", body: "..." });
 
-// consumer — worker pool shorthand
-const pool = new WorkerPool(pq, {
-  email: async (job) => { /* job.data is typed */ },
-  image: async (job) => { /* job.data is typed */ },
+// consumer
+const worker = new Worker(pq, "email", async (job) => {
+  // job.data is typed
 });
 ```
 
 ### Schema Migration Path (Future)
 
-In a future version, `definePanqueueConfig` will accept per-queue schemas (e.g. ArkType, Zod, Valibot). When schemas are provided, payload types are inferred from them and the explicit generic parameter becomes unnecessary:
+In a future version, `definePanqueueConfig` will accept per-queue schemas (e.g.
+ArkType, Zod, Valibot). When schemas are provided, payload types are inferred
+from them and the explicit generic parameter becomes unnecessary:
 
 ```ts
 // future
@@ -85,28 +104,43 @@ export const pq = definePanqueueConfig({
 });
 ```
 
-This is an additive change — no API shape change, just a new optional field that replaces the generic.
+This is an additive change — no API shape change, just a new optional field that
+replaces the generic.
 
 ### Config Scope
 
-The shared config holds everything both sides must agree on: Redis connection, queue IDs, modes, and keyed concurrency settings.
+The shared config holds everything both sides must agree on: Redis connection,
+queue IDs, and queue mode.
 
 Settings that are inherently one-sided stay with their respective constructors:
 
-- **Client-only:** per-queue default job options (TTL, retries, delay)
-- **Worker-only:** concurrency, executor type, shutdown timeouts, handler functions
+- **Client-only:** enqueue options such as retry count
+- **Worker-only:** concurrency, shutdown behavior, handler functions
 
-`QueueClient`, `Worker`, and `WorkerPool` may accept an optional Redis override for deployments where producer and consumer connect to different endpoints.
+`QueueClient` and `Worker` may accept an optional Redis override for deployments
+where producer and consumer connect to different endpoints.
 
 ## API Shape (Current Direction)
 
 ### Client
 
-`QueueClient` is the producer API. Queue IDs and payloads are strongly typed via the shared config or an explicit generic.
+`QueueClient` is the producer API. The single enqueue operation is:
+
+```ts
+await client.enqueue(queueId, payload, options?);
+```
+
+There is no `queue().add()` alias in v0.1. Keeping one producer operation makes
+examples, docs, and debugging predictable.
 
 ```ts
 // with shared config
-const client = new QueueClient(pq);
+const client = createQueueClient(pq);
+await client.enqueue("email", {
+  to: "a@b.com",
+  subject: "Hi",
+  body: "...",
+});
 
 // standalone (no shared config)
 const client = new QueueClient<DemoQueues>({
@@ -114,17 +148,26 @@ const client = new QueueClient<DemoQueues>({
 });
 ```
 
-`client.queue(queueId, defaults?)` returns a lightweight queue handle for per-queue defaults with per-job overrides on `.add()`.
+Job IDs are library-owned in v0.1: every enqueue creates a new concrete job with
+a generated ID. User-provided deduplication is a separate future feature, not a
+`jobId` overload.
 
 ### Worker
 
-`Worker` is the consumer unit — one worker processes one queue. The constructor takes the queue name and processor as positional arguments, with an options object for configuration. This keeps the two universal concerns (which queue, what to do) prominent and positional, while situational settings go in the trailing options bag.
+`Worker` is the consumer unit — one worker processes one queue. The constructor
+takes the queue name and processor as positional arguments, with an options
+object for configuration. This keeps the two universal concerns (which queue,
+what to do) prominent and positional, while situational settings go in the
+trailing options bag.
 
 Three tiers of worker definition, from most explicit to most convenient:
 
 #### Tier 1 — Standalone Worker (no shared config)
 
-Full self-contained unit. All configuration is provided directly. Type safety comes from an explicit generic. Use this when the worker runs in a separate process, connects to a different Redis, or doesn't share a config with the producer.
+Full self-contained unit. All configuration is provided directly. Type safety
+comes from an explicit generic. Use this when the worker runs in a separate
+process, connects to a different Redis, or doesn't share a config with the
+producer.
 
 ```ts
 const worker = new Worker<DemoQueues>("email", async (job) => {
@@ -137,7 +180,10 @@ const worker = new Worker<DemoQueues>("email", async (job) => {
 
 #### Tier 2 — Worker with shared config (cherry-pick + override)
 
-Gets Redis, queue definition, and defaults from the shared config. Worker-specific settings can be overridden in the trailing options. Full type safety inferred from the config's `QueueMap`. Use this when you want the worker in its own file but still tied to the shared config.
+Gets Redis, queue definition, and defaults from the shared config.
+Worker-specific settings can be overridden in the trailing options. Full type
+safety inferred from the config's `QueueMap`. Use this when you want the worker
+in its own file but still tied to the shared config.
 
 ```ts
 const worker = new Worker(pq, "email", async (job) => {
@@ -154,59 +200,74 @@ The options object is optional when the shared config provides everything:
 const worker = new Worker(pq, "email", async (job) => { ... });
 ```
 
-#### Tier 3 — WorkerPool shorthand
+#### Tier 3 — WorkerPool composition
 
-Maximum convenience for single-app setups. All config from shared config, you just supply processors inline. One worker per queue, shared shutdown.
-
-```ts
-const pool = new WorkerPool(pq, {
-  email: async (job) => { ... },
-  image: async (job) => { ... },
-});
-```
-
-#### Mixing tiers — pre-built workers in a pool
-
-`WorkerPool` also accepts pre-built `Worker` instances alongside inline processors. This lets you use custom per-worker config while still getting coordinated shutdown and health checks from the pool.
+`WorkerPool` is a small lifecycle layer over workers. It can create workers from
+the pool's base config, or it can manage workers the user already created.
 
 ```ts
-const emailWorker = new Worker(pq, "email", async (job) => { ... }, {
-  concurrency: 10,
-});
+const pool = new WorkerPool(pq);
 
-const pool = new WorkerPool(pq, {
-  email: emailWorker,                     // pre-built instance
-  image: async (job) => { ... },          // inline shorthand
-});
+pool.register("email", async (job) => { ... }, { concurrency: 10 });
+pool.register(new Worker(pq, "image", async (job) => { ... }));
+pool.register([
+  new Worker(pq, "billing", async (job) => { ... }),
+  new Worker(pq, "reports", async (job) => { ... }),
+]);
+
+await pool.start();
+await pool.shutdown();
 ```
 
-When a pre-built worker is passed to the pool:
+`register(queueId, processor, options?)` is shorthand for constructing a
+`Worker` from the pool's base config and registering it. `register(worker)` and
+`register(workers)` keep explicit workers composable.
 
-- The pool validates that the worker's queue ID matches the handler map key. A mismatch is a startup error.
-- The worker's own config wins — the pool does not override connection or concurrency settings on pre-built workers.
-- The pool owns the lifecycle. Calling `pool.shutdown()` shuts down all workers, including pre-built ones. Users should not call `shutdown()` separately on workers managed by a pool.
+```ts
+const pool = new WorkerPool<DemoQueues>({
+  connection: { host: "localhost", port: 6399 },
+});
+
+pool.register("email", async (job) => { ... });
+```
+
+A prebuilt worker's own config wins. The pool owns lifecycle only: start,
+shutdown, and aggregate health.
 
 ### Queue boundary
 
-One worker handles one queue. `queueId` should represent a workload class (to avoid head-of-line blocking).
+One worker handles one queue. `queueId` should represent a workload class (to
+avoid head-of-line blocking).
 
-### v0.1 limits
+### v0.1 Limits
 
-No dynamic queue-name escape hatch and no runtime schema validation yet (JSON-serializable payload validation on enqueue only).
+- Global FIFO queues only
+- Inline executor only
+- No delayed jobs or retry backoff
+- No keyed concurrency
+- No runtime schema validation beyond JSON-serializable payload checks
+- No dynamic queue-name escape hatch
 
 ## Job State Machine
 
 ```
-waiting → delayed → active → completed
-                  ↘         ↗
-                    failed (→ retry → waiting | DLQ)
+waiting → active → completed
+          ↘    ↗
+           failed
 ```
 
-All state transitions are atomic via Redis Lua scripts. No partial states, no race conditions.
+All state transitions are atomic via Redis Lua scripts. No partial states, no
+race conditions.
 
 ### Delivery Guarantee
 
-panqueue provides **at-least-once** delivery. The atomic Lua claim script ensures only one worker wins a given job at any time. However, if a worker crashes after completing work but before acknowledging completion, the stalled job sweep will requeue the job. Exactly-once semantics require idempotent handlers or external deduplication — this is the user's responsibility.
+panqueue provides **at-least-once** delivery. The atomic claim script ensures
+only one worker wins a given job lease at a time. If a worker crashes after
+doing work but before acknowledging completion, stalled recovery requeues the
+job.
+
+Exactly-once behavior requires idempotent handlers or external deduplication.
+panqueue should make duplicates controllable, not impossible.
 
 ## Executor Model
 
@@ -220,44 +281,60 @@ Three tiers of job execution, user-selectable per queue or per job type:
 
 ### Deno Permission Scoping (Web Worker executor)
 
-Workers can be spawned with granular, per-job-type permissions. This is a Deno-exclusive feature and a primary differentiator.
+Workers can be spawned with granular, per-job-type permissions. This is a
+Deno-exclusive feature and a primary differentiator.
 
-Example intent: an image processing job gets write access to `/tmp` and network access to a single S3 endpoint, nothing else.
+Example intent: an image processing job gets write access to `/tmp` and network
+access to a single S3 endpoint, nothing else.
 
 ## Redis Requirements
 
-- v0.1 accepts a Redis URL/config and manages the client internally (BYO client can be added later if real demand emerges).
-- No assumptions about Redis topology — single instance, Sentinel, and Cluster are the user's configuration concern.
-- Lua scripts handle all atomic operations (job claiming, state transitions, retry scheduling, stalled job detection).
-- Scheduled/repeatable jobs use Redis sorted sets with timestamp scoring, not runtime-level cron.
+- v0.1 accepts a Redis URL/config and manages the client internally (BYO client
+  can be added later if real demand emerges).
+- No assumptions about Redis topology — single instance, Sentinel, and Cluster
+  are the user's configuration concern.
+- Lua scripts handle atomic operations: enqueue, claim, complete, fail, and
+  stalled recovery.
+- Scheduled/repeatable jobs are future work and will use Redis sorted sets with
+  timestamp scoring, not runtime-level cron.
 
 ## Technical Constraints
 
 ### Redis Key Design (Cluster Compatibility)
 
-All keys for a given queue must share a hash slot to avoid `CROSSSLOT` errors in Redis Cluster. This is enforced from day one via Redis Hash Tags — all keys for a queue are prefixed with a bracketed identifier (e.g., `{q:myQueue}:waiting`, `{q:myQueue}:active`, `{q:myQueue}:jobs`). This ensures atomic Lua scripts operate on co-located keys regardless of Redis topology.
+All keys for a given queue must share a hash slot to avoid `CROSSSLOT` errors in
+Redis Cluster. This is enforced from day one via Redis Hash Tags — all keys for
+a queue are prefixed with a bracketed identifier (e.g., `{q:myQueue}:waiting`,
+`{q:myQueue}:active`, `{q:myQueue}:jobs`). This ensures atomic Lua scripts
+operate on co-located keys regardless of Redis topology.
 
 ### Job Payload Serialization
 
-All job payloads must be strictly JSON-serializable (primitives, plain objects, arrays). No class instances, functions, Dates, or other non-serializable types. This is a hard constraint driven by Web Worker structured clone boundaries and Redis storage. Enforced at the type level and validated at runtime on `queue.add()`.
+All job payloads must be strictly JSON-serializable (primitives, plain objects,
+arrays). No class instances, functions, Dates, or other non-serializable types.
+This is a hard constraint driven by Web Worker structured clone boundaries and
+Redis storage. Enforced at the type level and validated at runtime on
+`enqueue()`.
 
 ### Stalled Job Sweep Atomicity
 
-The stalled job detection sweep runs periodically on each consumer node. To prevent race conditions where multiple nodes attempt to requeue the same stalled job, the sweep must be a single atomic Lua script that verifies lock expiry and moves the job in one operation. Concurrent sweeps by different nodes must be harmless — each check-and-move either succeeds or no-ops.
+The stalled job detection sweep runs periodically on each consumer node. To
+prevent race conditions where multiple nodes attempt to requeue the same stalled
+job, the sweep must be a single atomic Lua script that verifies lock expiry and
+moves the job in one operation. Concurrent sweeps by different nodes must be
+harmless — each check-and-move either succeeds or no-ops.
 
 ### Failed Job Metadata
 
-When a job fails (final failure, not a retriable attempt), the job's Redis hash is updated with error metadata: error message, stack trace, and failure timestamp. This data persists for operational inspection and debugging. Retriable failures store the last error on each attempt for visibility into transient issues.
+When a job fails, the job's Redis hash is updated with error metadata and
+failure timestamp. This data persists for operational inspection and debugging.
 
-### Graceful Shutdown Across Executors
+### Graceful Shutdown
 
-Shutdown behavior varies by executor tier and must be explicitly handled:
-
-- **Inline:** Stop polling for new jobs, await in-flight promises, done.
-- **Web Worker:** Send `postMessage({ type: "shutdown" })`, await acknowledgment, hard-kill after configurable timeout.
-- **Subprocess:** Send shutdown signal via stdin IPC, await exit, `SIGTERM` → `SIGKILL` after configurable timeout.
-
-All executors must implement a two-phase shutdown: cooperative signal followed by forced termination. The hard timeout is non-negotiable — external code cannot be trusted to exit cleanly.
+v0.1 uses the simplest safe shutdown: stop claiming new jobs, wait for in-flight
+jobs to finish, then disconnect. Forced shutdown can be added later as an
+explicit API, but graceful shutdown must not silently disconnect under live
+work.
 
 ## Feature Scope
 
@@ -265,24 +342,28 @@ All executors must implement a two-phase shutdown: cooperative signal followed b
 
 - Job add / claim / complete / fail
 - Atomic state transitions (Lua)
-- Configurable retry with exponential backoff
-- Stalled job detection (periodic sweep of active jobs past lock timeout)
-- Graceful shutdown (stop claiming, drain in-flight, release locks)
+- Immediate retries
+- Job leases and stalled job recovery
+- Graceful shutdown without disconnecting under live work
 - Pub/sub worker wake-up (near-zero latency job pickup with polling fallback)
 - Inline executor only
 - Shared configuration via `definePanqueueConfig` (`@panqueue/config`)
 - Class-based client (`QueueClient`) and consumer (`Worker`, `WorkerPool`) APIs
-- Three-tier worker definition: standalone, shared-config, and pool shorthand
-- Failed job error persistence (message, stack, timestamp)
+- Single producer operation: `client.enqueue(queueId, payload, options?)`
+- Failed job error persistence
 
 ### v0.1 or v0.2 — Job Completion Waiting
 
-Client-side API for awaiting a job's completion (or failure) after enqueue. Enables request-response patterns where the producer needs the result before continuing. Exact API to be decided — likely a method on the job handle returned by `.add()` (e.g. `await job.waitForCompletion()`), backed by Redis pub/sub or polling. Scoping TBD.
+Client-side API for awaiting a job's completion (or failure) after enqueue.
+Enables request-response patterns where the producer needs the result before
+continuing. Exact API to be decided.
 
 ### v0.2 — Scheduling, Workers & Deduplication
 
 - Delayed jobs
+- Retry backoff
 - Repeatable/cron jobs (Redis-backed scheduler)
+- Keyed concurrency
 - Web Worker executor with Deno permission scoping
 - Subprocess executor
 - Job progress reporting
@@ -290,13 +371,22 @@ Client-side API for awaiting a job's completion (or failure) after enqueue. Enab
 
 #### Job Deduplication
 
-Opt-in deduplication prevents enqueueing a job that duplicates one already waiting or active.
+Opt-in deduplication prevents enqueueing a job that duplicates one already
+waiting or active.
 
-**Dedup key:** Always user-provided via a separate deduplication/idempotency field on `.add()`. The final field name is still TBD. panqueue does not auto-generate dedup keys from payloads, because the user decides what constitutes a duplicate. A helper utility `dedupFrom((payload) => string)` is provided for deriving dedup keys from payloads (e.g. hashing), but calling it is always explicit.
+**Dedup key:** Always user-provided via a separate deduplication/idempotency
+field on `enqueue()`. The final field name is still TBD. panqueue does not
+auto-generate dedup keys from payloads, because the user decides what
+constitutes a duplicate. A helper utility `dedupFrom((payload) => string)` can
+cover explicit payload-derived keys later.
 
-**Job identity:** `jobId` remains the identity of a concrete queue entry. It is distinct from the future deduplication/idempotency key and should not carry dedupe semantics.
+**Job identity:** `jobId` is library-owned and identifies a concrete queue
+entry. It is distinct from the deduplication/idempotency key and should not
+carry dedupe semantics.
 
-**Dedup window:** Controlled by a TTL on the dedup key in Redis. The key is set on enqueue and expires after the configured window. Within the window, a second enqueue with the same dedup key is rejected.
+**Dedup window:** Controlled by a TTL on the dedup key in Redis. The key is set
+on enqueue and expires after the configured window. Within the window, a second
+enqueue with the same dedup key is rejected.
 
 **Behavior on duplicate:** Configurable per queue in the shared config:
 
@@ -313,13 +403,15 @@ queues: {
 
     {q:<queueId>}:dedup:<dedup-key> = <jobId>  (TTL = window)
 
-The enqueue Lua script checks for the dedup key atomically before inserting the job.
+The enqueue Lua script checks for the dedup key atomically before inserting the
+job.
 
 ### v0.3 — Advanced
 
 - Priorities
 - Dead letter queues
-- Rate limiting (composable constraint, orthogonal to queue mode — see Decisions)
+- Rate limiting (composable constraint, orthogonal to queue mode — see
+  Decisions)
 - Event streaming (Redis Streams)
 - Job flows/dependencies
 
@@ -340,13 +432,18 @@ The enqueue Lua script checks for the dedup key atomically before inserting the 
 
 ## Positioning
 
-The Deno ecosystem currently has no production-grade job queue. Existing options are either Node-locked (BullMQ), runtime-specific toys (kvmq), or too early-stage (remq). panqueue targets the gap: a focused, reliable, Redis-backed queue with clean Deno-native DX and a unique sandboxing model via Deno's permission system.
+The Deno ecosystem currently has no production-grade job queue. Existing options
+are either Node-locked (BullMQ), runtime-specific toys (kvmq), or too
+early-stage (remq). panqueue targets the gap: a focused, reliable, Redis-backed
+queue with clean Deno-native DX and a unique sandboxing model via Deno's
+permission system.
 
 ## v0.1 Inline Executor Concurrency (Normative)
 
 ### Summary
 
-In v0.1, the inline executor runs handlers in the same process as the worker. Concurrency is enforced by a single claim loop plus a semaphore.
+In v0.1, the inline executor runs handlers in the same process as the worker.
+Concurrency is enforced by a single claim loop plus a semaphore.
 
 - At most `N` handlers run simultaneously (`concurrency = N`)
 - Jobs are only claimed when execution capacity is available
@@ -354,7 +451,8 @@ In v0.1, the inline executor runs handlers in the same process as the worker. Co
 - Pub/sub wake-up with polling fallback for low idle latency
 - Two-phase shutdown: stop claiming, then drain in-flight work
 
-This model is intentionally conservative and correctness-first for the initial release.
+This model is intentionally conservative and correctness-first for the initial
+release.
 
 ### Goals
 
@@ -374,7 +472,8 @@ A semaphore of size `concurrency` represents available execution slots.
 - Release the slot when the handler finishes (success or failure)
 - If no slot is available, the claim loop waits
 
-This guarantees the number of executing handlers never exceeds the configured limit.
+This guarantees the number of executing handlers never exceeds the configured
+limit.
 
 #### Single Claim Loop
 
@@ -388,13 +487,16 @@ Claim loop behavior:
    - Release the slot
    - Wait for queue notification or fallback poll interval
    - Retry
-4. If a job is claimed, dispatch the handler asynchronously and continue the loop.
+4. If a job is claimed, dispatch the handler asynchronously and continue the
+   loop.
 
-The claim loop coordinates capacity and dispatch. It does not execute handler code directly.
+The claim loop coordinates capacity and dispatch. It does not execute handler
+code directly.
 
 ### Rationale for Single Loop + Semaphore
 
-Spawning `N` independent claim loops is possible, but it increases Redis polling and makes future scheduling features harder to reason about.
+Spawning `N` independent claim loops is possible, but it increases Redis polling
+and makes future scheduling features harder to reason about.
 
 The single-loop design provides:
 
@@ -406,7 +508,8 @@ The single-loop design provides:
 
 ### No Prefetching (v0.1 Constraint)
 
-In v0.1, a job is only claimed when it can start immediately. Claimed jobs are not buffered locally.
+In v0.1, a job is only claimed when it can start immediately. Claimed jobs are
+not buffered locally.
 
 Why:
 
@@ -435,7 +538,8 @@ When execution ends:
 - Lock renewal stops
 - Semaphore slot is released
 
-Because claims happen only when capacity exists, lock TTL tracks real work time closely.
+Because claims happen only when capacity exists, lock TTL tracks real work time
+closely.
 
 ### Idle Behavior
 
@@ -445,7 +549,8 @@ If a claim attempt finds no job:
 - Wait for a pub/sub notification on `{q:<queueId>}:notify`
 - Also rely on a fallback poll interval (for missed notifications)
 
-Pub/sub is fire-and-forget, so the polling fallback preserves liveness during reconnects or transient network issues.
+Pub/sub is fire-and-forget, so the polling fallback preserves liveness during
+reconnects or transient network issues.
 
 ### Shutdown Semantics
 
@@ -462,7 +567,8 @@ The model supports clean two-phase shutdown.
 - Wait until all semaphore permits are returned
 - This implies all active handlers have finished
 
-Because there is no prefetching, the semaphore count accurately reflects in-flight execution.
+Because there is no prefetching, the semaphore count accurately reflects
+in-flight execution.
 
 ### v0.1 Guarantees
 
@@ -482,35 +588,44 @@ These are explicit tradeoffs in favor of correctness and simplicity.
 
 ## Planned Keyed Concurrency Mode (Future Spec)
 
-This section defines the Redis layout and scheduling logic for keyed concurrency mode (`keyed`). It is a planned mode, not part of the v0.1 core lifecycle.
+This section defines the Redis layout and scheduling logic for keyed concurrency
+mode (`keyed`). It is a planned mode, not part of the v0.1 core lifecycle.
 
 ### Overview
 
-Keyed concurrency limits concurrently processed jobs per concurrency key (for example `userId`, `tenantId`, or `projectId`) in addition to global worker concurrency.
+Keyed concurrency limits concurrently processed jobs per concurrency key (for
+example `userId`, `tenantId`, or `projectId`) in addition to global worker
+concurrency.
 
-This mode uses a different Redis structure than `global` mode and must be explicitly enabled per queue. Workers and clients must operate using the same mode for a queue.
+This mode uses a different Redis structure than `global` mode and must be
+explicitly enabled per queue. Workers and clients must operate using the same
+mode for a queue.
 
 ### Concurrency Modes
 
 #### `global`
 
-Only global worker concurrency is enforced. All jobs share the same execution pool. No per-key concurrency control.
+Only global worker concurrency is enforced. All jobs share the same execution
+pool. No per-key concurrency control.
 
 > At most **N jobs total** can run concurrently across the queue.
 
 #### `keyed`
 
-Concurrency is limited per concurrency key. Each job includes a key and each key can run up to a fixed number of concurrent jobs.
+Concurrency is limited per concurrency key. Each job includes a key and each key
+can run up to a fixed number of concurrent jobs.
 
 > At most **M jobs per key** can run concurrently.
 
 #### `dynamic` (future)
 
-Extends keyed concurrency by allowing limits to vary per key (with a queue-level default).
+Extends keyed concurrency by allowing limits to vary per key (with a queue-level
+default).
 
 > Concurrency per key is determined dynamically.
 
-Each queue has a single mode that determines its Redis data layout and scheduling logic.
+Each queue has a single mode that determines its Redis data layout and
+scheduling logic.
 
 ### Mode Metadata
 
@@ -525,8 +640,10 @@ Fields:
     seq = <integer>
 
 - `mode` defines the authoritative queue concurrency mode.
-- `keyConcurrency` is the default maximum number of concurrently active jobs per key.
-- `seq` is a monotonically increasing counter used to order the ready-key set; it is incremented on claims (for fairness rotation).
+- `keyConcurrency` is the default maximum number of concurrently active jobs per
+  key.
+- `seq` is a monotonically increasing counter used to order the ready-key set;
+  it is incremented on claims (for fairness rotation).
 
 ### Mode Validation
 
@@ -545,7 +662,8 @@ Fields:
 
 ### Keyed Scheduling Rules
 
-Keyed mode enforces a maximum number of concurrently active jobs per concurrency key.
+Keyed mode enforces a maximum number of concurrently active jobs per concurrency
+key.
 
 - Every job must include a concurrency key
 - Global worker concurrency limits still apply
@@ -591,11 +709,13 @@ A key is eligible for the ready set when:
 - it has at least one waiting job
 - its active count is below the key concurrency limit
 
-When a key is reinserted, it receives a new sequence score and moves to the back of the order, producing round-robin fairness across keys.
+When a key is reinserted, it receives a new sequence score and moves to the back
+of the order, producing round-robin fairness across keys.
 
 ### Readiness Invariant
 
-A key must be checked for ready-set insertion on every path that changes key state:
+A key must be checked for ready-set insertion on every path that changes key
+state:
 
 1. Job enqueue
 2. Job completion (success or failure)
@@ -606,18 +726,22 @@ Each path must independently verify:
 - waiting jobs exist
 - concurrency capacity is available
 
-If both are true, the key must be inserted into the ready set. This prevents missed-wakeup scheduling gaps caused by non-atomic state changes across different code paths.
+If both are true, the key must be inserted into the ready set. This prevents
+missed-wakeup scheduling gaps caused by non-atomic state changes across
+different code paths.
 
 ### Job Claiming (Keyed Mode)
 
-Workers claim jobs with the following logical sequence (implemented atomically in Lua):
+Workers claim jobs with the following logical sequence (implemented atomically
+in Lua):
 
 1. Select the lowest-scored eligible key from the ready-key set.
 2. Pop the next job from that key's waiting list.
 3. Increment the key's active counter.
 4. Move the job to the global active job state.
 5. Re-evaluate key readiness.
-6. Reinsert the key into the ready set with a new score if it still has waiting jobs and available key capacity.
+6. Reinsert the key into the ready set with a new score if it still has waiting
+   jobs and available key capacity.
 
 If the key is empty or at capacity after the claim, do not reinsert it.
 
@@ -627,7 +751,8 @@ When a job finishes (success or failure):
 
 1. Decrement the key's active counter.
 2. Re-evaluate the readiness invariant.
-3. Reinsert the key into the ready set if it has waiting jobs and available capacity.
+3. Reinsert the key into the ready set if it has waiting jobs and available
+   capacity.
 
 This makes newly available key capacity immediately schedulable.
 
@@ -639,7 +764,10 @@ When recovering a stalled keyed job:
 2. Return the job to the **front** of its key waiting list using `LPUSH`.
 3. Re-evaluate the readiness invariant and reinsert the key if eligible.
 
-`LPUSH` prioritizes previously running jobs, but if multiple stalled jobs for the same key are recovered in one cycle, their relative order may not match original execution order. Strict ordering among simultaneously recovered jobs is not guaranteed in this design.
+`LPUSH` prioritizes previously running jobs, but if multiple stalled jobs for
+the same key are recovered in one cycle, their relative order may not match
+original execution order. Strict ordering among simultaneously recovered jobs is
+not guaranteed in this design.
 
 ### Key Lifecycle
 
@@ -658,7 +786,8 @@ its associated per-key structures may be removed to reduce Redis memory usage.
 - Workers and clients must use the same queue mode
 - Queue mode metadata must remain consistent across deployments
 
-Mode mismatches can result in jobs being written to Redis structures that active workers do not process.
+Mode mismatches can result in jobs being written to Redis structures that active
+workers do not process.
 
 ### Performance Characteristics
 
@@ -668,8 +797,11 @@ Compared with `global` mode:
 - Claiming requires sorted-set work proportional to the number of active keys
 - Memory usage scales with the number of active keys (plus queued jobs)
 
-Queues that do not require per-key fairness/isolation should use `global` mode to minimize Redis overhead.
+Queues that do not require per-key fairness/isolation should use `global` mode
+to minimize Redis overhead.
 
 ## Decision Log
 
-Non-authoritative rationale and decision history lives in `DECISIONS.md`. `SPEC.md` is the single source of truth for current behavior and planned designs.
+Non-authoritative rationale and decision history lives in `DECISIONS.md`.
+`SPEC.md` is the single source of truth for current behavior and planned
+designs.
