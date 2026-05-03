@@ -3,7 +3,13 @@ import type {
   JsonSerializable,
   QueueMap,
 } from "@panqueue/internal";
-import { type Processor, type ShutdownResult, Worker, type WorkerOptions } from "./worker.ts";
+import {
+  type Processor,
+  type ShutdownOptions,
+  type ShutdownResult,
+  Worker,
+  type WorkerOptions,
+} from "./worker.ts";
 
 /** Options for constructing a WorkerPool. */
 export interface WorkerPoolOptions {
@@ -13,8 +19,6 @@ export interface WorkerPoolOptions {
   concurrency?: number;
   /** Default poll interval in ms for all workers. Default: 5000. */
   pollInterval?: number;
-  /** Default shutdown timeout in ms for all workers. Default: 5000. */
-  shutdownTimeout?: number;
 }
 
 /** Helper type for defining processor functions in separate files. */
@@ -87,8 +91,6 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
         connection: this.#options.connection,
         concurrency: reg.options?.concurrency ?? this.#options.concurrency,
         pollInterval: reg.options?.pollInterval ?? this.#options.pollInterval,
-        shutdownTimeout: reg.options?.shutdownTimeout ??
-          this.#options.shutdownTimeout,
         events: reg.options?.events,
       });
       this.#workers.set(queueId, worker);
@@ -117,29 +119,35 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
     }
   }
 
-  /** Graceful shutdown of all workers. */
-  async shutdown(): Promise<ShutdownResult> {
+  /**
+   * Shut down all workers. Defaults to force shutdown — see
+   * {@link Worker.shutdown} for the difference between force and drain modes.
+   */
+  async shutdown(options?: ShutdownOptions): Promise<ShutdownResult> {
+    const mode: "force" | "drain" = options?.drain ? "drain" : "force";
     if (!this.#started) {
-      return { timedOut: false, unfinishedJobs: 0 };
+      return { mode, timedOut: false, unfinishedJobs: 0, requeued: 0 };
     }
 
     const results = await Promise.allSettled(
-      [...this.#workers.values()].map((w) => w.shutdown()),
+      [...this.#workers.values()].map((w) => w.shutdown(options)),
     );
 
     let timedOut = false;
     let unfinishedJobs = 0;
+    let requeued = 0;
     for (const result of results) {
       if (result.status === "fulfilled") {
         if (result.value.timedOut) timedOut = true;
         unfinishedJobs += result.value.unfinishedJobs;
+        requeued += result.value.requeued;
       }
     }
 
     this.#workers.clear();
     this.#started = false;
 
-    return { timedOut, unfinishedJobs };
+    return { mode, timedOut, unfinishedJobs, requeued };
   }
 
   async [Symbol.asyncDispose](): Promise<void> {

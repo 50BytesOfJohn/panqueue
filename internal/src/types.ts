@@ -88,6 +88,16 @@ export interface JobData<T extends JsonSerializable = JsonSerializable> {
 
   /** Error message from the most recent failure, if any. */
   failedReason?: string;
+
+  /**
+   * Server-generated lease token written on every claim. Used to fence
+   * complete/fail/extend operations against stalled-job recovery: a worker
+   * must present a matching token to mutate the job's terminal state.
+   */
+  lockToken?: string;
+
+  /** Unix timestamp (ms) at which the current lease expires. */
+  leaseDeadline?: number;
 }
 
 /**

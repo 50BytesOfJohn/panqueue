@@ -1,31 +1,51 @@
 ---
-title: Hello World
-description: Your favourite docs framework.
+title: Panqueue
+description: Redis-backed queues for Deno.
 icon: Rocket
 ---
 
-Hey there! Fumadocs is a docs framework that works on Waku!
+Panqueue is a Deno-first queue library backed by Redis.
 
-## Heading
+The v0.1 API is built around a small set of ownership boundaries:
 
-Hello World!
+- `definePanqueueConfig` describes Redis connection config and typed queues.
+- `QueueClient` owns the producer Redis connection and enqueues jobs.
+- `defineWorker` creates pure worker definitions with typed processors.
+- `WorkerPool` owns the worker-side Redis connections and runs registered
+  worker definitions.
 
-<Cards>
-  <Card title="Learn more about Waku" href="https://waku.gg" />
-  <Card title="Learn more about Fumadocs" href="https://fumadocs.dev" />
-</Cards>
+Users pass Redis connection configuration, not Redis client objects.
 
-### CodeBlock
+## Example
 
 ```ts
-console.log('Hello World');
+import { definePanqueueConfig } from "@panqueue/config";
+import { createQueueClient } from "@panqueue/client";
+import { defineWorker, WorkerPool } from "@panqueue/worker";
+
+type Queues = {
+  email: { to: string; subject: string; body: string };
+};
+
+export const pq = definePanqueueConfig<Queues>({
+  redis: { url: Deno.env.get("REDIS_URL")! },
+  queues: {
+    email: { mode: "global" },
+  },
+});
+
+const client = createQueueClient(pq);
+await client.enqueue("email", {
+  to: "hello@example.com",
+  subject: "Welcome",
+  body: "Thanks for trying Panqueue.",
+});
+
+const emailWorker = defineWorker(pq, "email", async (job) => {
+  await sendEmail(job.data);
+});
+
+const pool = new WorkerPool(pq);
+pool.register(emailWorker);
+await pool.start();
 ```
-
-#### Table
-
-| Head                            | Description                         |
-| ------------------------------- | ----------------------------------- |
-| `hello`                         | Hello World                         |
-| very **important**              | Hey                                 |
-| _Surprisingly_                  | Fumadocs                            |
-| very long text that looks weird | hello world hello world hello world |

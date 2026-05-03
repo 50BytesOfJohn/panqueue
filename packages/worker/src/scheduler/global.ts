@@ -17,12 +17,13 @@ export class GlobalJobScheduler<
   }
 
   /** Claim the next job from the waiting list using an atomic Lua script. */
-  async claim(): Promise<JobData<T> | null> {
+  async claim(leaseMs: number): Promise<JobData<T> | null> {
     const result = await this.client.claimGlobal(
       waitingKey(this.queueId),
       activeKey(this.queueId),
       jobsKey(this.queueId),
       String(Date.now()),
+      String(leaseMs),
     );
 
     if (!result) return null;

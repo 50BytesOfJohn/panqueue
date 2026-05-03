@@ -12,3 +12,4 @@ Please note that library is not released yet. This means that we do not need bac
 * DX is crucial part of Panqueue
 * We add comments to make logic and decisions clear for contributors, as well as good JS docs for developers integrating Panqueue
 * We do not over engineer. Simplicity and balance. Sometimes perfect code is not necessery.
+* Never use `as any` or `as unknown` hacks. All types should be proper and nice and work together.

@@ -156,7 +156,9 @@ Deno.test("abort listener is removed when waiter resolves via release", async ()
   // Spy on removeEventListener to verify cleanup
   let removeCalled = false;
   const origRemove = signal.removeEventListener.bind(signal);
-  signal.removeEventListener = (...args: Parameters<AbortSignal["removeEventListener"]>) => {
+  signal.removeEventListener = (
+    ...args: Parameters<AbortSignal["removeEventListener"]>
+  ) => {
     removeCalled = true;
     return origRemove(...args);
   };

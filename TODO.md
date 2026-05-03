@@ -10,11 +10,16 @@ Focused v0.1 TODO list from the current review and product decisions.
   - Recovery must be atomic and safe when multiple workers sweep at the same
     time.
 
-- [ ] Make graceful shutdown truly graceful for v0.1.
-  - Stop claiming new jobs.
-  - Wait for in-flight jobs to finish before disconnecting Redis.
-  - Do not silently disconnect under live work.
-  - Leave any future forced shutdown as an explicit API.
+- [x] Make shutdown semantics explicit for v0.1.
+  - Default is force shutdown: stop claiming, atomically requeue every in-flight
+    job (so another worker can pick it up immediately, no waiting on the lease
+    clock), then disconnect.
+  - Drain mode is opt-in via `shutdown({ drain: true, timeout? })`. A drain
+    timeout escalates to force-requeue rather than disconnecting silently under
+    live work.
+  - Inversion of the 2026-04-29 plan: with leases + recovery in place, force is
+    safe and avoids the deployment-hang footgun on long jobs. Cooperative
+    cancellation (AbortSignal in processors) is deferred.
 
 - [ ] Fix enqueue identity semantics.
   - v0.1 job IDs are generated and owned by panqueue.
@@ -40,19 +45,22 @@ Focused v0.1 TODO list from the current review and product decisions.
     operation.
   - Support both shared `PanqueueConfig` and standalone custom connection
     config.
+  - Panqueue owns the underlying Redis client instance. Users pass connection
+    config, not a Redis client object.
 
-- [ ] Implement `WorkerPool` as a tiny lifecycle/composition layer.
-  - `register(queueId, processor, options?)` creates and registers a worker from
-    pool config.
-  - `register(worker)` registers a prebuilt worker.
-  - `register(workers)` registers an array of prebuilt workers.
-  - A prebuilt worker's own config wins; the pool only owns
-    start/shutdown/health.
+- [ ] Implement `defineWorker` for pure worker definitions.
+  - `defineWorker(config, queueId, processor, options?)` captures a typed
+    processor and worker-only options.
+  - Worker definitions open no Redis connections and own no lifecycle.
+  - Worker definitions do not accept Redis connection overrides.
 
-- [ ] Keep `Worker` usable independently from `WorkerPool`.
-  - Support shared `PanqueueConfig`.
-  - Support standalone custom connection config.
-  - Starting and shutting down a single worker should not require a pool.
+- [ ] Implement `WorkerPool` as the consumer lifecycle boundary.
+  - `register(workerDefinition)` registers a worker definition.
+  - `register(workerDefinitions)` registers an array of worker definitions.
+  - `register(queueId, processor, options?)` remains available as compact
+    single-file shorthand.
+  - `WorkerPool` creates and reuses the worker-side Redis instances for all
+    registered worker definitions based on its connection config.
 
 ## Release Quality
 

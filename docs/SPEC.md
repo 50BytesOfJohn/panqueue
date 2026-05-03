@@ -33,7 +33,7 @@ Three packages with clear dependency direction:
 | ------------------ | ------------------------------------------------------- | ------------------ |
 | `@panqueue/config` | Shared queue definitions, types, `definePanqueueConfig` | —                  |
 | `@panqueue/client` | Producer API (`QueueClient`)                            | `@panqueue/config` |
-| `@panqueue/worker` | Consumer API (`Worker`, `WorkerPool`)                   | `@panqueue/config` |
+| `@panqueue/worker` | Consumer API (`defineWorker`, `WorkerPool`)             | `@panqueue/config` |
 
 `@panqueue/config` is the shared foundation. It contains no runtime logic beyond
 the identity function `definePanqueueConfig` and the associated types. It
@@ -74,8 +74,8 @@ always safe.
 
 ### Type Flow
 
-`QueueClient` and `Worker` accept the config object and infer the full queue
-map:
+`QueueClient` and `defineWorker` accept the config object and infer the full
+queue map:
 
 ```ts
 // producer
@@ -83,7 +83,7 @@ const client = createQueueClient(pq);
 await client.enqueue("email", { to: "a@b.com", subject: "Hi", body: "..." });
 
 // consumer
-const worker = new Worker(pq, "email", async (job) => {
+const emailWorker = defineWorker(pq, "email", async (job) => {
   // job.data is typed
 });
 ```
@@ -117,8 +117,13 @@ Settings that are inherently one-sided stay with their respective constructors:
 - **Client-only:** enqueue options such as retry count
 - **Worker-only:** concurrency, shutdown behavior, handler functions
 
-`QueueClient` and `Worker` may accept an optional Redis override for deployments
-where producer and consumer connect to different endpoints.
+`QueueClient` and `WorkerPool` may accept an optional Redis override for
+deployments where producers and consumers connect to different endpoints.
+
+Panqueue owns Redis client instances in v0.1. Users provide connection
+configuration, not Redis client objects. A `QueueClient` instance owns its
+producer connection. A `WorkerPool` instance owns the worker-side connections it
+needs to run every registered worker definition.
 
 ## API Shape (Current Direction)
 
@@ -152,87 +157,59 @@ Job IDs are library-owned in v0.1: every enqueue creates a new concrete job with
 a generated ID. User-provided deduplication is a separate future feature, not a
 `jobId` overload.
 
-### Worker
+### Workers
 
-`Worker` is the consumer unit — one worker processes one queue. The constructor
-takes the queue name and processor as positional arguments, with an options
-object for configuration. This keeps the two universal concerns (which queue,
-what to do) prominent and positional, while situational settings go in the
-trailing options bag.
-
-Three tiers of worker definition, from most explicit to most convenient:
-
-#### Tier 1 — Standalone Worker (no shared config)
-
-Full self-contained unit. All configuration is provided directly. Type safety
-comes from an explicit generic. Use this when the worker runs in a separate
-process, connects to a different Redis, or doesn't share a config with the
-producer.
+Workers are defined as pure processor definitions and executed by a
+`WorkerPool`. `defineWorker` does not open Redis connections and does not start
+work. It captures the queue ID, typed processor, and worker-specific options so
+definitions can live in separate files without also owning connections or
+lifecycle.
 
 ```ts
-const worker = new Worker<DemoQueues>("email", async (job) => {
-  // job.data typed as DemoQueues["email"]
-}, {
-  connection: { host: "localhost", port: 6399 },
-  concurrency: 5,
-});
-```
-
-#### Tier 2 — Worker with shared config (cherry-pick + override)
-
-Gets Redis, queue definition, and defaults from the shared config.
-Worker-specific settings can be overridden in the trailing options. Full type
-safety inferred from the config's `QueueMap`. Use this when you want the worker
-in its own file but still tied to the shared config.
-
-```ts
-const worker = new Worker(pq, "email", async (job) => {
+// workers/email.ts
+export const emailWorker = defineWorker(pq, "email", async (job) => {
   // job.data typed from shared config
 }, {
-  concurrency: 10, // override shared config default
+  concurrency: 10,
 });
 ```
 
-The options object is optional when the shared config provides everything:
-
-```ts
-// common case — config provides all settings
-const worker = new Worker(pq, "email", async (job) => { ... });
-```
-
-#### Tier 3 — WorkerPool composition
-
-`WorkerPool` is a small lifecycle layer over workers. It can create workers from
-the pool's base config, or it can manage workers the user already created.
+`WorkerPool` owns start/shutdown and the Redis instances needed by all
+registered worker definitions.
 
 ```ts
 const pool = new WorkerPool(pq);
 
-pool.register("email", async (job) => { ... }, { concurrency: 10 });
-pool.register(new Worker(pq, "image", async (job) => { ... }));
 pool.register([
-  new Worker(pq, "billing", async (job) => { ... }),
-  new Worker(pq, "reports", async (job) => { ... }),
+  emailWorker,
+  imageWorker,
+  billingWorker,
 ]);
 
 await pool.start();
 await pool.shutdown();
 ```
 
-`register(queueId, processor, options?)` is shorthand for constructing a
-`Worker` from the pool's base config and registering it. `register(worker)` and
-`register(workers)` keep explicit workers composable.
+Inline registration remains available for compact single-file workers:
 
 ```ts
-const pool = new WorkerPool<DemoQueues>({
-  connection: { host: "localhost", port: 6399 },
-});
+const pool = new WorkerPool(pq);
 
 pool.register("email", async (job) => { ... });
 ```
 
-A prebuilt worker's own config wins. The pool owns lifecycle only: start,
-shutdown, and aggregate health.
+`WorkerPool` uses the Redis connection from `pq.redis` unless an override is
+provided. The connection config shape stays the same as the shared config:
+
+```ts
+const pool = new WorkerPool(pq, {
+  connection: { host: "localhost", port: 6399 },
+});
+```
+
+Worker definitions do not carry Redis connection configuration. This keeps
+connection reuse simple: one pool creates the worker Redis instances once and
+shares them across every registered queue.
 
 ### Queue boundary
 
@@ -289,8 +266,11 @@ access to a single S3 endpoint, nothing else.
 
 ## Redis Requirements
 
-- v0.1 accepts a Redis URL/config and manages the client internally (BYO client
-  can be added later if real demand emerges).
+- v0.1 accepts a Redis URL/config and manages Redis client instances internally.
+  User-provided Redis client objects are not part of the v0.1 API.
+- A `QueueClient` instance creates and reuses one producer Redis connection.
+- A `WorkerPool` instance creates and reuses the worker-side Redis connections
+  needed for all registered worker definitions.
 - No assumptions about Redis topology — single instance, Sentinel, and Cluster
   are the user's configuration concern.
 - Lua scripts handle atomic operations: enqueue, claim, complete, fail, and
@@ -329,12 +309,24 @@ harmless — each check-and-move either succeeds or no-ops.
 When a job fails, the job's Redis hash is updated with error metadata and
 failure timestamp. This data persists for operational inspection and debugging.
 
-### Graceful Shutdown
+### Shutdown
 
-v0.1 uses the simplest safe shutdown: stop claiming new jobs, wait for in-flight
-jobs to finish, then disconnect. Forced shutdown can be added later as an
-explicit API, but graceful shutdown must not silently disconnect under live
-work.
+v0.1 ships two shutdown modes; **force is the default**.
+
+- **Force (`worker.shutdown()`):** stop the claim loop, atomically requeue every
+  in-flight job (fenced on lockToken) so another worker can pick it up
+  immediately, then disconnect Redis. Local handlers continue running until the
+  process exits; their eventual complete/fail no-ops as `stale` because the
+  lockToken has been cleared. Force shutdown relies on the at-least-once
+  contract — processors must be idempotent.
+- **Drain (`worker.shutdown({ drain: true, timeout? })`):** stop the claim loop,
+  wait for in-flight jobs to acknowledge, then disconnect. If `timeout` is
+  supplied and elapses, drain falls through to the force-requeue path so the
+  worker never disconnects silently under live work.
+
+Force is the default because, with leases and stalled-job recovery in place,
+killing an in-flight job is safe (it gets re-executed) and gives predictable,
+bounded shutdown latency even when handlers run for minutes.
 
 ## Feature Scope
 
@@ -344,11 +336,13 @@ work.
 - Atomic state transitions (Lua)
 - Immediate retries
 - Job leases and stalled job recovery
-- Graceful shutdown without disconnecting under live work
+- Force shutdown by default with proactive in-flight requeue; drain mode
+  available as an opt-in
 - Pub/sub worker wake-up (near-zero latency job pickup with polling fallback)
 - Inline executor only
 - Shared configuration via `definePanqueueConfig` (`@panqueue/config`)
-- Class-based client (`QueueClient`) and consumer (`Worker`, `WorkerPool`) APIs
+- Class-based client (`QueueClient`) plus `defineWorker`/`WorkerPool` consumer
+  APIs
 - Single producer operation: `client.enqueue(queueId, payload, options?)`
 - Failed job error persistence
 
@@ -449,7 +443,8 @@ Concurrency is enforced by a single claim loop plus a semaphore.
 - Jobs are only claimed when execution capacity is available
 - No local prefetch buffer of claimed jobs
 - Pub/sub wake-up with polling fallback for low idle latency
-- Two-phase shutdown: stop claiming, then drain in-flight work
+- Shutdown stops claiming, then either force-requeues in-flight work by default
+  or drains when requested
 
 This model is intentionally conservative and correctness-first for the initial
 release.
@@ -554,21 +549,27 @@ reconnects or transient network issues.
 
 ### Shutdown Semantics
 
-The model supports clean two-phase shutdown.
+Shutdown is two-phase. The default **force** mode runs both phases without
+waiting between them.
 
 #### Phase 1: Stop Claiming
 
-- Set `stopping = true`
-- Exit the claim loop
+- Transition to `stopping`
+- Abort any pending semaphore acquire and exit the claim loop
 - Claim no new jobs
 
-#### Phase 2: Drain In-Flight Jobs
+#### Phase 2: Hand Off In-Flight Jobs
 
-- Wait until all semaphore permits are returned
-- This implies all active handlers have finished
+- **Force (default):** for each in-flight job, run an atomic `requeue_active`
+  Lua script fenced on lockToken — ZREM from active, clear
+  lockToken/leaseDeadline, LPUSH back to waiting (or move to failed when retries
+  are exhausted), PUBLISH notify. Then disconnect. Local handlers continue
+  running but their complete/fail are no-ops.
+- **Drain (opt-in):** wait for semaphore permits to return; on optional
+  `timeout`, fall through to the force handoff.
 
-Because there is no prefetching, the semaphore count accurately reflects
-in-flight execution.
+Because there is no prefetching, the in-flight set accurately reflects handler
+executions and is bounded by the configured concurrency.
 
 ### v0.1 Guarantees
 

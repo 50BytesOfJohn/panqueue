@@ -1,9 +1,9 @@
 import { expect } from "jsr:@std/expect";
 import { assertSpyCalls, type Spy, spy, stub } from "jsr:@std/testing/mock";
 import {
+  _internals,
   type RedisClient,
   RedisConnection,
-  _internals,
 } from "./redis_connection.ts";
 
 /** Creates a fake Redis client with spied methods. */

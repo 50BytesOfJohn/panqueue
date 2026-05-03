@@ -39,7 +39,7 @@ async function redisQueueStats(queueId: string) {
   await c.connect();
   const r = c.redis.client;
   const waiting = await r.lLen(`{q:${queueId}}:waiting`);
-  const active = await r.sCard(`{q:${queueId}}:active`);
+  const active = await r.zCard(`{q:${queueId}}:active`);
   const completed = await r.sCard(`{q:${queueId}}:completed`);
   const failed = await r.sCard(`{q:${queueId}}:failed`);
   await c.disconnect();
@@ -83,7 +83,7 @@ async function scenario1_throughput() {
   const { promise: allDone, resolve: onAllDone } = Promise.withResolvers<void>();
 
   const processStart = performance.now();
-  const worker = new Worker<LoadQueues>(
+  const worker = new Worker<LoadQueues, "fast">(
     "fast",
     async () => {
       // no-op — measuring pure claim/complete overhead
@@ -206,7 +206,7 @@ async function scenario3_mixedFailures() {
   const { promise: allDone, resolve: onAllDone } = Promise.withResolvers<void>();
 
   const start = performance.now();
-  const worker = new Worker<LoadQueues>(
+  const worker = new Worker<LoadQueues, "mixed">(
     "mixed",
     async (job) => {
       totalAttempts++;
@@ -294,7 +294,7 @@ async function scenario4_simulatedWork() {
   const { promise: allDone, resolve: onAllDone } = Promise.withResolvers<void>();
 
   const processStart = performance.now();
-  const worker = new Worker<LoadQueues>(
+  const worker = new Worker<LoadQueues, "heavy">(
     "heavy",
     async (job) => {
       const workStart = performance.now();

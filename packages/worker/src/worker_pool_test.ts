@@ -1,6 +1,6 @@
 import { expect } from "jsr:@std/expect";
 import { type Spy, spy, stub } from "jsr:@std/testing/mock";
-import { type RedisClient, _internals } from "./redis_connection.ts";
+import { _internals, type RedisClient } from "./redis_connection.ts";
 import { WorkerPool } from "./worker_pool.ts";
 
 type TestQueues = {
@@ -36,7 +36,8 @@ function stubCreateClients(...fakeClients: RedisClient[]) {
     _internals,
     "createClient",
     // deno-lint-ignore no-explicit-any
-    (() => fakeClients[callCount++] ?? fakeClients[fakeClients.length - 1]) as any,
+    (() =>
+      fakeClients[callCount++] ?? fakeClients[fakeClients.length - 1]) as any,
   );
 }
 
@@ -161,7 +162,12 @@ Deno.test("WorkerPool — shutdown() returns clean result when not started", asy
   });
 
   const result = await pool.shutdown();
-  expect(result).toEqual({ timedOut: false, unfinishedJobs: 0 });
+  expect(result).toEqual({
+    mode: "force",
+    timedOut: false,
+    unfinishedJobs: 0,
+    requeued: 0,
+  });
 });
 
 Deno.test("WorkerPool — shutdown() aggregates results from all workers", async () => {

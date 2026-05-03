@@ -7,7 +7,7 @@
 
 import { QueueClient } from "@panqueue/client";
 import { Worker } from "@panqueue/worker";
-import type { WorkerState, ShutdownResult } from "@panqueue/worker";
+import type { ShutdownResult, WorkerState } from "@panqueue/worker";
 
 const CONNECTION = { host: "localhost", port: 6399 };
 
@@ -54,24 +54,48 @@ async function test1_stateTransitions() {
     },
   });
 
-  assert(worker.state === "idle", `Initial state is "idle" (got "${worker.state}")`);
+  assert(
+    worker.state === "idle",
+    `Initial state is "idle" (got "${worker.state}")`,
+  );
   assert(!worker.isRunning, "isRunning is false before start");
 
   await worker.start();
-  assert(worker.state === "running", `State after start is "running" (got "${worker.state}")`);
+  assert(
+    worker.state === "running",
+    `State after start is "running" (got "${worker.state}")`,
+  );
   assert(worker.isRunning, "isRunning is true after start");
 
   const result = await worker.shutdown();
-  assert(worker.state === "stopped", `State after shutdown is "stopped" (got "${worker.state}")`);
+  assert(
+    worker.state === "stopped",
+    `State after shutdown is "stopped" (got "${worker.state}")`,
+  );
   assert(!worker.isRunning, "isRunning is false after shutdown");
   assert(!result.timedOut, "Clean shutdown did not time out");
   assert(result.unfinishedJobs === 0, "No unfinished jobs");
 
-  assert(transitions.length === 4, `4 transitions fired (got ${transitions.length})`);
-  assert(transitions[0][0] === "idle" && transitions[0][1] === "starting", "idle → starting");
-  assert(transitions[1][0] === "starting" && transitions[1][1] === "running", "starting → running");
-  assert(transitions[2][0] === "running" && transitions[2][1] === "stopping", "running → stopping");
-  assert(transitions[3][0] === "stopping" && transitions[3][1] === "stopped", "stopping → stopped");
+  assert(
+    transitions.length === 4,
+    `4 transitions fired (got ${transitions.length})`,
+  );
+  assert(
+    transitions[0][0] === "idle" && transitions[0][1] === "starting",
+    "idle → starting",
+  );
+  assert(
+    transitions[1][0] === "starting" && transitions[1][1] === "running",
+    "starting → running",
+  );
+  assert(
+    transitions[2][0] === "running" && transitions[2][1] === "stopping",
+    "running → stopping",
+  );
+  assert(
+    transitions[3][0] === "stopping" && transitions[3][1] === "stopped",
+    "stopping → stopped",
+  );
 }
 
 // ──────────────────────────────────────────────────────────
@@ -85,17 +109,31 @@ async function test2_processWithEvents() {
   const client = new QueueClient<TestQueues>({ connection: CONNECTION });
   const ids: string[] = [];
   for (let i = 0; i < 3; i++) {
-    ids.push(await client.enqueue("emails", { to: `user${i}@test.com`, subject: `Test ${i}` }));
+    ids.push(
+      await client.enqueue("emails", {
+        to: `user${i}@test.com`,
+        subject: `Test ${i}`,
+      }),
+    );
   }
   console.log(`  Enqueued ${ids.length} jobs: ${ids.join(", ")}`);
 
   // Verify waiting list
-  const waitingBefore = await client.redis.client.lRange("{q:emails}:waiting", 0, -1);
-  assert(waitingBefore.length === 3, `3 jobs in waiting list (got ${waitingBefore.length})`);
+  const waitingBefore = await client.redis.client.lRange(
+    "{q:emails}:waiting",
+    0,
+    -1,
+  );
+  assert(
+    waitingBefore.length === 3,
+    `3 jobs in waiting list (got ${waitingBefore.length})`,
+  );
 
   const started: string[] = [];
   const completed: string[] = [];
-  const { promise: allDone, resolve: onAllDone } = Promise.withResolvers<void>();
+  const { promise: allDone, resolve: onAllDone } = Promise.withResolvers<
+    void
+  >();
 
   const worker = new Worker<TestQueues>(
     "emails",
@@ -125,26 +163,53 @@ async function test2_processWithEvents() {
   await allDone;
   await worker.shutdown();
 
-  assert(started.length === 3, `onJobStart fired 3 times (got ${started.length})`);
-  assert(completed.length === 3, `onJobComplete fired 3 times (got ${completed.length})`);
+  assert(
+    started.length === 3,
+    `onJobStart fired 3 times (got ${started.length})`,
+  );
+  assert(
+    completed.length === 3,
+    `onJobComplete fired 3 times (got ${completed.length})`,
+  );
 
   // Verify Redis state
-  const waitingAfter = await client.redis.client.lRange("{q:emails}:waiting", 0, -1);
-  assert(waitingAfter.length === 0, `Waiting list is empty (got ${waitingAfter.length})`);
+  const waitingAfter = await client.redis.client.lRange(
+    "{q:emails}:waiting",
+    0,
+    -1,
+  );
+  assert(
+    waitingAfter.length === 0,
+    `Waiting list is empty (got ${waitingAfter.length})`,
+  );
 
-  const activeAfter = await client.redis.client.sMembers("{q:emails}:active");
-  assert(activeAfter.length === 0, `Active set is empty (got ${activeAfter.length})`);
+  const activeAfter = await client.redis.client.zCard("{q:emails}:active");
+  assert(
+    activeAfter === 0,
+    `Active set is empty (got ${activeAfter})`,
+  );
 
-  const completedSet = await client.redis.client.sMembers("{q:emails}:completed");
-  assert(completedSet.length === 3, `Completed set has 3 entries (got ${completedSet.length})`);
+  const completedSet = await client.redis.client.sMembers(
+    "{q:emails}:completed",
+  );
+  assert(
+    completedSet.length === 3,
+    `Completed set has 3 entries (got ${completedSet.length})`,
+  );
 
   // Verify job data shows completed status
   for (const id of ids) {
     const raw = await client.redis.client.hGet("{q:emails}:jobs", id);
     if (raw) {
       const job = JSON.parse(raw);
-      assert(job.status === "completed", `Job ${id} status is "completed" (got "${job.status}")`);
-      assert(typeof job.finishedAt === "number", `Job ${id} has finishedAt timestamp`);
+      assert(
+        job.status === "completed",
+        `Job ${id} status is "completed" (got "${job.status}")`,
+      );
+      assert(
+        typeof job.finishedAt === "number",
+        `Job ${id} has finishedAt timestamp`,
+      );
     }
   }
 
@@ -159,14 +224,16 @@ async function test3_failedJobsAndRetries() {
   await flushRedis();
 
   const client = new QueueClient<TestQueues>({ connection: CONNECTION });
-  const jobId = await client.enqueue("failing", { shouldFail: true }, { retries: 2 });
+  const jobId = await client.enqueue("failing", { shouldFail: true }, {
+    retries: 2,
+  });
   console.log(`  Enqueued failing job: ${jobId} (retries: 2)`);
 
   const failEvents: { id: string; error: string }[] = [];
   let attempts = 0;
   const { promise: done, resolve: onDone } = Promise.withResolvers<void>();
 
-  const worker = new Worker<TestQueues>(
+  const worker = new Worker<TestQueues, "failing">(
     "failing",
     async (job) => {
       attempts++;
@@ -199,7 +266,10 @@ async function test3_failedJobsAndRetries() {
   await worker.shutdown();
 
   assert(attempts === 3, `Handler was called 3 times (got ${attempts})`);
-  assert(failEvents.length === 3, `onJobFail fired 3 times (got ${failEvents.length})`);
+  assert(
+    failEvents.length === 3,
+    `onJobFail fired 3 times (got ${failEvents.length})`,
+  );
 
   // Verify final state in Redis — job should be in failed set after exhausting retries
   const failedSet = await client.redis.client.sMembers("{q:failing}:failed");
@@ -208,8 +278,14 @@ async function test3_failedJobsAndRetries() {
   const raw = await client.redis.client.hGet("{q:failing}:jobs", jobId);
   if (raw) {
     const job = JSON.parse(raw);
-    assert(job.status === "failed", `Job status is "failed" (got "${job.status}")`);
-    assert(job.failedReason === "Attempt 3 failed", `failedReason recorded (got "${job.failedReason}")`);
+    assert(
+      job.status === "failed",
+      `Job status is "failed" (got "${job.status}")`,
+    );
+    assert(
+      job.failedReason === "Attempt 3 failed",
+      `failedReason recorded (got "${job.failedReason}")`,
+    );
     assert(job.attempts === 3, `attempts count is 3 (got ${job.attempts})`);
   }
 
@@ -217,20 +293,21 @@ async function test3_failedJobsAndRetries() {
 }
 
 // ──────────────────────────────────────────────────────────
-// Test 4: Shutdown timeout with structured result
+// Test 4: Force shutdown requeues in-flight jobs
 // ──────────────────────────────────────────────────────────
 async function test4_shutdownTimeout() {
-  console.log("\n🔬 Test 4: Shutdown timeout returns structured result");
+  console.log("\n🔬 Test 4: Force shutdown requeues in-flight jobs");
   await flushRedis();
 
   const client = new QueueClient<TestQueues>({ connection: CONNECTION });
   await client.enqueue("slow", { delay: 5000 });
   console.log("  Enqueued slow job (5s delay)");
 
-  const errors: { context: string; error: unknown }[] = [];
-  const { promise: jobStarted, resolve: onJobStarted } = Promise.withResolvers<void>();
+  const { promise: jobStarted, resolve: onJobStarted } = Promise.withResolvers<
+    void
+  >();
 
-  const worker = new Worker<TestQueues>(
+  const worker = new Worker<TestQueues, "slow">(
     "slow",
     async (job) => {
       onJobStarted();
@@ -239,30 +316,32 @@ async function test4_shutdownTimeout() {
     {
       connection: CONNECTION,
       pollInterval: 100,
-      shutdownTimeout: 200, // 200ms timeout — job takes 5s
       events: {
         onJobStart: (job) => console.log(`    → onJobStart: ${job.id}`),
-        onError: (ctx, err) => {
-          console.log(`    → onError[${ctx}]: ${err}`);
-          errors.push({ context: ctx, error: err });
-        },
+        onError: (ctx, err) => console.log(`    → onError[${ctx}]: ${err}`),
       },
     },
   );
 
   await worker.start();
   await jobStarted;
-  console.log("  Job started processing, initiating shutdown with 200ms timeout...");
+  console.log("  Job started processing, initiating force shutdown...");
 
   const result: ShutdownResult = await worker.shutdown();
-  console.log(`  Shutdown result: timedOut=${result.timedOut}, unfinishedJobs=${result.unfinishedJobs}`);
+  console.log(
+    `  Shutdown result: mode=${result.mode}, unfinishedJobs=${result.unfinishedJobs}, requeued=${result.requeued}`,
+  );
 
-  assert(result.timedOut === true, "Shutdown timed out");
-  assert(result.unfinishedJobs === 1, `1 unfinished job (got ${result.unfinishedJobs})`);
-  assert(worker.state === "stopped", `State is "stopped" (got "${worker.state}")`);
-
-  const timeoutErrors = errors.filter((e) => e.context === "shutdown-timeout");
-  assert(timeoutErrors.length === 1, "shutdown-timeout error was emitted");
+  assert(result.mode === "force", "Default shutdown is force");
+  assert(
+    result.unfinishedJobs === 1,
+    `1 unfinished job (got ${result.unfinishedJobs})`,
+  );
+  assert(result.requeued === 1, `1 requeued job (got ${result.requeued})`);
+  assert(
+    worker.state === "stopped",
+    `State is "stopped" (got "${worker.state}")`,
+  );
 
   await client.disconnect();
 }
@@ -297,8 +376,13 @@ async function test5_restart() {
   await worker.start();
   await new Promise((r) => setTimeout(r, 300));
   await worker.shutdown();
-  console.log(`  Run 1: processed ${processed.length} job(s), state=${worker.state}`);
-  assert(processed.length === 1, `Run 1 processed 1 job (got ${processed.length})`);
+  console.log(
+    `  Run 1: processed ${processed.length} job(s), state=${worker.state}`,
+  );
+  assert(
+    processed.length === 1,
+    `Run 1 processed 1 job (got ${processed.length})`,
+  );
   assert(worker.state === "stopped", `State is "stopped" after first run`);
 
   // Run 2 — restart the same worker instance
@@ -306,8 +390,13 @@ async function test5_restart() {
   await worker.start();
   await new Promise((r) => setTimeout(r, 300));
   await worker.shutdown();
-  console.log(`  Run 2: processed ${processed.length} total job(s), state=${worker.state}`);
-  assert(processed.length === 2, `Total processed is 2 (got ${processed.length})`);
+  console.log(
+    `  Run 2: processed ${processed.length} total job(s), state=${worker.state}`,
+  );
+  assert(
+    processed.length === 2,
+    `Total processed is 2 (got ${processed.length})`,
+  );
   assert(worker.state === "stopped", `State is "stopped" after second run`);
 
   // Verify full transition sequence
@@ -333,7 +422,9 @@ async function test5_restart() {
 // Test 6: onError fallback to console (no events provided)
 // ──────────────────────────────────────────────────────────
 async function test6_consoleDefaultFallback() {
-  console.log("\n🔬 Test 6: Default console.error fallback (no onError handler)");
+  console.log(
+    "\n🔬 Test 6: Default console.error fallback (no onError handler)",
+  );
   await flushRedis();
 
   const client = new QueueClient<TestQueues>({ connection: CONNECTION });
@@ -360,9 +451,14 @@ async function test6_consoleDefaultFallback() {
   await new Promise((r) => setTimeout(r, 100));
   await worker.shutdown();
 
-  assert(processed.length === 1, `Processed 1 job without events configured (got ${processed.length})`);
+  assert(
+    processed.length === 1,
+    `Processed 1 job without events configured (got ${processed.length})`,
+  );
   assert(worker.state === "stopped", "Worker stopped cleanly");
-  console.log("  (If there were errors, they would have appeared in console above)");
+  console.log(
+    "  (If there were errors, they would have appeared in console above)",
+  );
 
   await client.disconnect();
 }
@@ -378,13 +474,18 @@ async function test7_concurrency() {
 
   // Enqueue 5 jobs
   for (let i = 0; i < 5; i++) {
-    await client.enqueue("emails", { to: `user${i}@test.com`, subject: `Job ${i}` });
+    await client.enqueue("emails", {
+      to: `user${i}@test.com`,
+      subject: `Job ${i}`,
+    });
   }
 
   let concurrent = 0;
   let maxConcurrent = 0;
   let totalProcessed = 0;
-  const { promise: allDone, resolve: onAllDone } = Promise.withResolvers<void>();
+  const { promise: allDone, resolve: onAllDone } = Promise.withResolvers<
+    void
+  >();
 
   const worker = new Worker<TestQueues>(
     "emails",
@@ -401,8 +502,10 @@ async function test7_concurrency() {
       concurrency: 3,
       pollInterval: 100,
       events: {
-        onJobStart: (job) => console.log(`    → start ${job.id} (concurrent: ${concurrent})`),
-        onJobComplete: (job) => console.log(`    → done  ${job.id} (concurrent: ${concurrent})`),
+        onJobStart: (job) =>
+          console.log(`    → start ${job.id} (concurrent: ${concurrent})`),
+        onJobComplete: (job) =>
+          console.log(`    → done  ${job.id} (concurrent: ${concurrent})`),
       },
     },
   );
@@ -411,13 +514,20 @@ async function test7_concurrency() {
   await allDone;
   await worker.shutdown();
 
-  console.log(`  Max concurrent: ${maxConcurrent}, Total processed: ${totalProcessed}`);
+  console.log(
+    `  Max concurrent: ${maxConcurrent}, Total processed: ${totalProcessed}`,
+  );
   assert(maxConcurrent <= 3, `Max concurrent ≤ 3 (got ${maxConcurrent})`);
   assert(totalProcessed === 5, `All 5 jobs processed (got ${totalProcessed})`);
 
   // Verify all completed in Redis
-  const completedSet = await client.redis.client.sMembers("{q:emails}:completed");
-  assert(completedSet.length === 5, `5 jobs in completed set (got ${completedSet.length})`);
+  const completedSet = await client.redis.client.sMembers(
+    "{q:emails}:completed",
+  );
+  assert(
+    completedSet.length === 5,
+    `5 jobs in completed set (got ${completedSet.length})`,
+  );
 
   await client.disconnect();
 }

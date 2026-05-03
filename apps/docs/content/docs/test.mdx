@@ -1,12 +1,29 @@
 ---
-title: Test
-description: This is another page
+title: Connection Ownership
+description: How Panqueue manages Redis connections.
 ---
 
-Hello World again!
+Panqueue owns Redis client instances internally in v0.1.
 
-## Installation
+The user-facing API accepts connection config:
 
-```npm
-npm i fumadocs-core fumadocs-ui
+```ts
+export const pq = definePanqueueConfig<Queues>({
+  redis: { url: Deno.env.get("REDIS_URL")! },
+  queues: {
+    email: { mode: "global" },
+  },
+});
+```
+
+`QueueClient` creates and reuses the producer Redis connection. `WorkerPool`
+creates and reuses the worker-side Redis connections for every registered
+worker definition.
+
+Worker definitions are pure and do not own connections:
+
+```ts
+export const emailWorker = defineWorker(pq, "email", async (job) => {
+  await sendEmail(job.data);
+});
 ```

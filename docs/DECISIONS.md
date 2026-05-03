@@ -3,7 +3,127 @@
 This file records rationale and dated decisions. It is not the source of truth
 for behavior; `SPEC.md` is authoritative.
 
+## 2026-05-03: Panqueue-Owned Redis Instances & Pure Worker Definitions
+
+### Decision
+
+- v0.1 keeps Panqueue-owned Redis client instances. Users pass Redis connection
+  config; they do not pass Redis client objects.
+- `QueueClient` is the producer connection boundary. Each client instance
+  creates and reuses the Redis connection needed for enqueue operations.
+- `WorkerPool` is the consumer connection boundary. Each pool creates and reuses
+  the worker-side Redis connections needed by every registered worker
+  definition.
+- Worker definitions are pure. `defineWorker(...)` captures the typed queue
+  processor and worker-specific options but opens no connections and owns no
+  lifecycle.
+- `WorkerPool.register(...)` accepts worker definitions and inline
+  `queueId`/processor registrations. The pool materializes those definitions
+  when started.
+- Worker definitions do not carry Redis connection config. Pool-level connection
+  config wins for all workers in the pool.
+
+## 2026-05-01: Force Shutdown as Default, Drain as Opt-In (v0.1)
+
+### Decision
+
+- `Worker.shutdown()` defaults to **force**: stop the claim loop, atomically
+  requeue every in-flight job via a fenced Lua script (`requeue_active`), then
+  disconnect Redis. Local handlers keep running until the process exits; their
+  eventual complete/fail no-op as `stale` because the lockToken has been cleared
+  by the requeue.
+- `Worker.shutdown({ drain: true, timeout? })` opts into the previous drain
+  semantics. If `timeout` is provided and elapses, the worker falls through to
+  the force-requeue path so it never disconnects silently under live work.
+- `ShutdownResult` is now
+  `{ mode: "force" | "drain"; timedOut; unfinishedJobs; requeued }`.
+- `WorkerOptions.shutdownTimeout` is removed; the timeout lives on
+  `shutdown({ timeout })` in drain mode only.
+- The new `requeueActive` script mirrors `recover` (fenced on lockToken instead
+  of lease deadline): if the killed claim still has retries left it goes back to
+  `waiting` with a `PUBLISH` notification; if it has exhausted retries it goes
+  straight to `failed` with reason `"shutdown"`. A force shutdown is therefore
+  indistinguishable from a stall, except the worker that owns the lease executes
+  the handoff itself instead of waiting for the lease clock.
+
+### Why
+
+- This inverts the 2026-04-29 "graceful shutdown is the default" decision. The
+  shape that decision picked — graceful with a 5s timeout — was the worst of
+  both: callers who set a long timeout hung deployments under long jobs; callers
+  who left the 5s default silently disconnected under live work, which the TODO
+  explicitly called out as a bug.
+- Job leases and stalled-job recovery (2026-04-30) are what makes force safe. A
+  force-shutdown job is not lost: it is requeued, fenced by lockToken, and
+  either picked up immediately by another worker or swept by recovery.
+  At-least-once is preserved.
+- Naive force has a latency hole — in-flight jobs would sit in `active` until
+  the lease deadline (default 30s) and then up to one recovery-sweep interval
+  (default 30s) before being eligible again. That is too long for a default. The
+  proactive `requeueActive` Lua script eliminates the wait: shutdown handoff is
+  immediate, no extra steady-state Redis cost, paid only at shutdown time.
+- `shutdown({ drain: true })` is still ~30 lines of code we already have
+  working, and is the right escape hatch for users with non-idempotent
+  processors. Shipping both modes today (with force as the default) is cheaper
+  than removing drain only to add it back in v0.1.1.
+- Single API with explicit options keeps the surface small and the default
+  communicative. Two methods (`shutdown` + `terminate`) was considered and
+  rejected as more API for no benefit.
+
+### Tradeoffs
+
+- Force shutdown makes "your processor must be idempotent" a hard requirement
+  rather than a soft one. Documented prominently.
+- Cooperative cancellation (`AbortSignal` passed to processors) is deferred to
+  v0.2 — it is breaking on the processor signature and not needed for the v0.1
+  force-shutdown story.
+- A force-shutdown job whose `attempts` already equals `maxRetries + 1` goes
+  straight to `failed` rather than being requeued. This matches recovery
+  behavior and avoids resurrecting jobs that have already exhausted retries.
+
+## 2026-04-30: Job Leases & Stalled-Job Recovery (v0.1)
+
+### Decision
+
+- The `active` collection is a Redis `ZSET` scored by lease deadline (ms), not a
+  `SET`. Each claim writes the deadline as the score and a fresh
+  server-generated `lockToken` (sha1 of jobId + now + attempts) on the job hash.
+- `complete`, `fail`, and `extend_lock` Lua scripts fence on `lockToken`: they
+  no-op if the caller's token does not match the hash. A stale ack surfaces to
+  the worker via the `onJobStale` event.
+- Lock renewal runs in the background per in-flight job (default cadence
+  `leaseMs / 3`) using `ZADD XX` plus a token check. If renewal returns 0 (lease
+  lost), the renewer stops and emits a `lease-lost:<jobId>` error.
+- A periodic `recover` sweep on each worker (default 30s, batch 100) is a single
+  atomic Lua script: `ZRANGEBYSCORE 0 now`, then per candidate `ZSCORE`+`ZREM`
+  (re-fence under script atomicity), requeue or move to `failed` based on
+  remaining retries. Concurrent sweeps are safe — only the first `ZREM` wins.
+- Recovery treats the crashed claim as a consumed attempt and does not
+  re-increment `attempts`. A job that stalls on its last allowed attempt goes
+  directly to `failed`.
+
+### Why
+
+- Carrying the lease deadline as the ZSET score collapses "is active" and "lease
+  expired?" into one structure, which makes the sweep an index-backed
+  `ZRANGEBYSCORE` instead of an O(N) scan of per-job lock keys plus the active
+  set.
+- A dedicated `lockToken` keeps fencing semantics independent of `attempts`.
+  Reusing `attempts` would have worked but coupled retry accounting to lease
+  identity — any future change (separating execution attempts from stall
+  recoveries, manual-retry APIs) would silently break the fence. The few extra
+  bytes per job hash are worth the clarity.
+- `ZSCORE`+`ZREM` inside the same Lua script is the only way to safely fence
+  against a renewer pushing the deadline forward at exactly the same instant a
+  sweeper fires.
+- Per-worker sweep with no leader election keeps the v0.1 model simple; the
+  atomic script makes concurrent sweepers harmless.
+
 ## 2026-04-29: v0.1 Alpha Scope, Single Producer API & WorkerPool Composition
+
+> **Note:** The producer API remains current. The worker composition details
+> were superseded by the 2026-05-03 `defineWorker` and pool-owned connection
+> decision.
 
 ### Decision
 
@@ -18,6 +138,8 @@ for behavior; `SPEC.md` is authoritative.
   backoff, and richer executors move to v0.2+.
 - Graceful shutdown in v0.1 stops claiming, waits for in-flight work to finish,
   then disconnects. Forced shutdown can be added later as an explicit API.
+  _(Superseded 2026-05-01: with leases + recovery in place, force shutdown
+  became the default; drain is the opt-in.)_
 - `WorkerPool` is a thin lifecycle layer over workers.
 - `WorkerPool.register(...)` accepts:
   - a queue ID, processor, and optional worker options
@@ -39,6 +161,8 @@ for behavior; `SPEC.md` is authoritative.
   larger scheduling design.
 - A pool should not be the only way to run jobs. `Worker` remains a standalone
   block; `WorkerPool` only coordinates multiple workers when that is useful.
+  _(Superseded 2026-05-03: worker definitions are pure and `WorkerPool` is the
+  v0.1 public execution boundary.)_
 
 ## 2026-03-22: Pay-for-What-You-Use Lua Scripts & EVALSHA Caching
 
@@ -118,9 +242,9 @@ optimization for Panqueue.
 
 ## 2026-03-10: Class-Based API & Three-Tier Worker Design
 
-> **Note:** The class-based API remains current. The WorkerPool handler-map
-> constructor was superseded by the 2026-04-29 `register(...)` composition
-> decision.
+> **Note:** The class-based `QueueClient` and `WorkerPool` APIs remain current.
+> The public live-`Worker` construction model was superseded by the 2026-05-03
+> `defineWorker` decision.
 
 ### Decision
 
@@ -157,6 +281,9 @@ optimization for Panqueue.
   or concurrency)
 - Pool owns lifecycle: `pool.shutdown()` shuts down all workers including
   pre-built ones
+
+_Superseded 2026-05-03: worker definitions no longer own connection config;
+pool-level connection config is the v0.1 execution boundary._
 
 ## 2026-02-20: v0.1 API Direction
 
@@ -209,11 +336,15 @@ Both `createQueueClient` and `createWorkerPool` accept an optional Redis
 override for deployments where producer and consumer connect to different
 endpoints.
 
+_Updated 2026-05-03: this remains true conceptually, but the current public
+worker API is `new WorkerPool(config, options?)` plus `defineWorker` rather than
+`createWorkerPool(config, handlers)`._
+
 ### Deferred
 
 - Runtime schema validation (per-queue schemas replacing the generic parameter)
 - Dynamic queue names escape hatch
-- BYO Redis client instance
+- User-provided Redis client instance
 
 ## 2026-02-20: Inline Executor Concurrency Model (v0.1)
 

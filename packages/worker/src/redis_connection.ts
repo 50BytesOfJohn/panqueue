@@ -1,4 +1,8 @@
-import { createClient, type RedisClientOptions, type RedisClientType } from "redis";
+import {
+  createClient,
+  type RedisClientOptions,
+  type RedisClientType,
+} from "redis";
 import type { ConnectionOptions } from "@panqueue/internal";
 import { WORKER_SCRIPTS } from "./scripts.ts";
 
@@ -89,14 +93,14 @@ export class RedisConnection {
       database: options.db,
       socket: options.tls
         ? {
-            host: options.host ?? "localhost",
-            port: options.port ?? 6379,
-            tls: true,
-          }
+          host: options.host ?? "localhost",
+          port: options.port ?? 6379,
+          tls: true,
+        }
         : {
-            host: options.host ?? "localhost",
-            port: options.port ?? 6379,
-          },
+          host: options.host ?? "localhost",
+          port: options.port ?? 6379,
+        },
     } satisfies RedisClientOptions;
   }
 }

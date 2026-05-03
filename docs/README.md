@@ -1,6 +1,7 @@
 # Docs
 
-`SPEC.md` is the single source of truth for the library spec (current behavior and planned designs).
+`SPEC.md` is the single source of truth for the library spec (current behavior
+and planned designs).
 
 ## Files
 

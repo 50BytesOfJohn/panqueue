@@ -35,18 +35,52 @@ export interface WorkerEventHandlers<
   onJobComplete?: (job: JobData<T>) => void;
   /** Called when a job fails (handler threw). */
   onJobFail?: (job: JobData<T>, error: string) => void;
+  /** Called when a job's lease was lost (recovery requeued it under us). */
+  onJobStale?: (job: JobData<T>, phase: "complete" | "fail") => void;
+  /** Called when stalled jobs are recovered by this worker's sweep. */
+  onJobRecovered?: (jobIds: string[]) => void;
   /** Called on internal errors. Falls back to console.error when not provided. */
   onError?: (context: string, error: unknown) => void;
   /** Called on every lifecycle state transition. */
   onStateChange?: (from: WorkerState, to: WorkerState) => void;
 }
 
+/** Options accepted by {@link Worker.shutdown}. */
+export interface ShutdownOptions {
+  /**
+   * When true, wait for in-flight jobs to acknowledge (complete/fail) before
+   * disconnecting Redis. When false (the default), in-flight jobs are
+   * immediately handed back to the queue via an atomic requeue script so
+   * another worker can pick them up without waiting for the lease to expire.
+   *
+   * Force shutdown (the default) relies on the at-least-once contract:
+   * processors must be idempotent because a force-shutdown job is
+   * re-executed on the next worker that claims it. The local handler keeps
+   * running until the process exits, but its eventual complete/fail
+   * no-ops because the lockToken has been cleared.
+   *
+   * Default: `false` (force).
+   */
+  drain?: boolean;
+  /**
+   * Drain timeout in milliseconds. If the drain does not finish in time,
+   * still-in-flight jobs are requeued and Redis is disconnected so the
+   * library never silently exits under live work. Ignored when
+   * `drain` is false. Default: no timeout (wait indefinitely).
+   */
+  timeout?: number;
+}
+
 /** Result returned by shutdown(). */
 export interface ShutdownResult {
-  /** Whether the shutdown timed out before all jobs finished. */
+  /** The mode this shutdown ran in. */
+  mode: "force" | "drain";
+  /** Whether a drain timed out before all jobs finished (drain mode only). */
   timedOut: boolean;
-  /** Number of jobs still in-flight when shutdown completed. */
+  /** Number of jobs still in-flight locally when shutdown returned. */
   unfinishedJobs: number;
+  /** Number of in-flight jobs successfully requeued for another worker. */
+  requeued: number;
 }
 
 /** Options for constructing a Worker. */
@@ -59,14 +93,40 @@ export interface WorkerOptions<
   concurrency?: number;
   /** Fallback polling interval in ms. Default: 5000. */
   pollInterval?: number;
-  /** Hard shutdown timeout in ms. Default: 5000. */
-  shutdownTimeout?: number;
+  /**
+   * Lease duration in ms for claimed jobs. The job's lease is extended
+   * periodically while the handler runs; a crashed worker that fails to
+   * extend its lease loses the job to stalled-job recovery after this
+   * window. Default: 30_000.
+   */
+  leaseMs?: number;
+  /**
+   * Interval in ms between lock renewals for in-flight jobs. Defaults to
+   * leaseMs / 3, which gives two retries before the lease can expire.
+   */
+  lockRenewMs?: number;
+  /**
+   * Interval in ms between stalled-job recovery sweeps. Each sweep is a
+   * single atomic Lua script and is safe to run concurrently across
+   * multiple workers on the same queue. Default: 30_000. Set to 0 to
+   * disable recovery on this worker.
+   */
+  recoverIntervalMs?: number;
+  /** Maximum jobs processed per recovery sweep. Default: 100. */
+  recoverBatchSize?: number;
   /** Event handlers for observability. */
   events?: WorkerEventHandlers<T>;
 }
 
 /** Brand symbol for WorkerPool detection. */
 const WORKER_BRAND = Symbol.for("panqueue.worker");
+
+interface InFlightEntry {
+  promise: Promise<void>;
+  jobId: string;
+  lockToken: string;
+  stopRenewer: () => void;
+}
 
 /**
  * Consumes jobs from a queue and executes a processor function.
@@ -85,7 +145,10 @@ export class Worker<
   readonly #processor: Processor;
   readonly #concurrency: number;
   readonly #pollInterval: number;
-  readonly #shutdownTimeout: number;
+  readonly #leaseMs: number;
+  readonly #lockRenewMs: number;
+  readonly #recoverIntervalMs: number;
+  readonly #recoverBatchSize: number;
   readonly #connectionOptions: ConnectionOptions;
   readonly #events: WorkerEventHandlers;
 
@@ -98,8 +161,9 @@ export class Worker<
   #claimLoopPromise: Promise<void> | null = null;
   #startPromise: Promise<void> | null = null;
   #notifyResolve: (() => void) | null = null;
-  #inFlight = new Set<Promise<void>>();
+  #inFlight = new Set<InFlightEntry>();
   #stopController: AbortController | null = null;
+  #recoverTimer: ReturnType<typeof setInterval> | null = null;
 
   /** Tier 1 — standalone (no shared config). */
   constructor(
@@ -165,7 +229,11 @@ export class Worker<
 
     this.#concurrency = options?.concurrency ?? 1;
     this.#pollInterval = options?.pollInterval ?? 5000;
-    this.#shutdownTimeout = options?.shutdownTimeout ?? 5000;
+    this.#leaseMs = options?.leaseMs ?? 30_000;
+    this.#lockRenewMs = options?.lockRenewMs ??
+      Math.max(1, Math.floor(this.#leaseMs / 3));
+    this.#recoverIntervalMs = options?.recoverIntervalMs ?? 30_000;
+    this.#recoverBatchSize = options?.recoverBatchSize ?? 100;
     this.#events = (options?.events ?? {}) as WorkerEventHandlers;
   }
 
@@ -234,11 +302,48 @@ export class Worker<
 
     this.#transition("running");
     this.#claimLoopPromise = this.#claimLoop();
+    this.#startRecoveryTimer();
   }
 
-  /** Graceful shutdown: stop claiming, drain in-flight jobs, disconnect. */
-  async shutdown(): Promise<ShutdownResult> {
-    const clean: ShutdownResult = { timedOut: false, unfinishedJobs: 0 };
+  #startRecoveryTimer(): void {
+    if (this.#recoverIntervalMs <= 0) return;
+    this.#recoverTimer = setInterval(() => {
+      this.#runRecoverySweep();
+    }, this.#recoverIntervalMs);
+  }
+
+  async #runRecoverySweep(): Promise<void> {
+    if (this.#state !== "running") return;
+    try {
+      const recovered = await this.#scheduler.recover(this.#recoverBatchSize);
+      if (recovered.length > 0) {
+        try {
+          this.#events.onJobRecovered?.(recovered);
+        } catch { /* swallow */ }
+      }
+    } catch (err) {
+      this.#emitError("recover", err);
+    }
+  }
+
+  /**
+   * Stop consuming jobs and disconnect from Redis.
+   *
+   * **Default (force) shutdown:** stops the claim loop, atomically requeues
+   * every in-flight job so another worker can pick it up immediately, and
+   * disconnects. Local handlers keep running until the process exits; their
+   * eventual complete/fail no-ops because the lockToken has been cleared.
+   * This relies on the at-least-once contract — processors must be
+   * idempotent.
+   *
+   * **Drain (`{ drain: true, timeout? }`):** waits for in-flight jobs to
+   * finish before disconnecting. If `timeout` is provided and elapses, any
+   * still-in-flight jobs are force-requeued and the worker disconnects so
+   * it never exits silently under live work.
+   */
+  async shutdown(options?: ShutdownOptions): Promise<ShutdownResult> {
+    const drain = options?.drain ?? false;
+    const mode: "force" | "drain" = drain ? "drain" : "force";
 
     // If start() is in progress, wait for it to finish (or fail) before
     // proceeding. Without this, shutdown would no-op while startup continues.
@@ -248,41 +353,73 @@ export class Worker<
       } catch { /* start failed — nothing to shut down */ }
     }
 
-    if (this.#state !== "running") return clean;
+    if (this.#state !== "running") {
+      return { mode, timedOut: false, unfinishedJobs: 0, requeued: 0 };
+    }
 
     this.#transition("stopping");
     this.#stopController?.abort();
+    if (this.#recoverTimer) {
+      clearInterval(this.#recoverTimer);
+      this.#recoverTimer = null;
+    }
     this.#wakeClaimLoop();
     await this.#claimLoopPromise;
 
-    // Drain in-flight jobs with timeout
     let timedOut = false;
-    let unfinishedJobs = 0;
 
-    if (this.#inFlight.size > 0) {
-      const drainPromise = Promise.allSettled(this.#inFlight);
-      let shutdownTimer: ReturnType<typeof setTimeout>;
-      const timeoutPromise = new Promise<void>((resolve) => {
-        shutdownTimer = setTimeout(resolve, this.#shutdownTimeout);
-      });
+    if (drain && this.#inFlight.size > 0) {
+      const drainPromise = Promise.allSettled(
+        [...this.#inFlight].map((e) => e.promise),
+      );
 
-      const result = await Promise.race([
-        drainPromise.then(() => "drained" as const),
-        timeoutPromise.then(() => "timeout" as const),
-      ]);
-      clearTimeout(shutdownTimer!);
-
-      if (result === "timeout" && this.#inFlight.size > 0) {
-        timedOut = true;
-        unfinishedJobs = this.#inFlight.size;
-        this.#emitError(
-          "shutdown-timeout",
-          new Error(
-            `${unfinishedJobs} job(s) still running. Disconnecting with in-flight work.`,
-          ),
-        );
+      if (options?.timeout !== undefined) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<"timeout">((resolve) => {
+          timer = setTimeout(() => resolve("timeout"), options.timeout);
+        });
+        const result = await Promise.race([
+          drainPromise.then(() => "drained" as const),
+          timeoutPromise,
+        ]);
+        if (timer) clearTimeout(timer);
+        timedOut = result === "timeout";
+      } else {
+        await drainPromise;
       }
     }
+
+    // Force-requeue any still-in-flight jobs. In drain mode this only fires
+    // on timeout; in force mode it is the normal path.
+    let requeued = 0;
+    const stillRunning = [...this.#inFlight];
+    if (stillRunning.length > 0) {
+      // Stop renewers up front so they cannot race the requeue script.
+      for (const entry of stillRunning) {
+        try {
+          entry.stopRenewer();
+        } catch { /* swallow */ }
+      }
+
+      const reason = drain ? "shutdown-timeout" : "shutdown";
+      const results = await Promise.allSettled(
+        stillRunning.map((e) =>
+          this.#scheduler.requeueActive(e.jobId, e.lockToken, reason)
+        ),
+      );
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        if (r.status === "fulfilled") {
+          if (r.value === "waiting" || r.value === "failed") requeued++;
+        } else {
+          this.#emitError(
+            `requeue:${stillRunning[i].jobId}`,
+            r.reason,
+          );
+        }
+      }
+    }
+    const unfinishedJobs = stillRunning.length;
 
     try {
       const channel = notifyKey(this.#queueId);
@@ -295,7 +432,7 @@ export class Worker<
     this.#transition("stopped");
     this.#claimLoopPromise = null;
 
-    return { timedOut, unfinishedJobs };
+    return { mode, timedOut, unfinishedJobs, requeued };
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
@@ -320,7 +457,7 @@ export class Worker<
 
       let jobData: JobData | null;
       try {
-        jobData = await this.#scheduler.claim();
+        jobData = await this.#scheduler.claim(this.#leaseMs);
       } catch (err) {
         this.#semaphore.release();
         this.#emitError("claim", err);
@@ -334,32 +471,53 @@ export class Worker<
         continue;
       }
 
-      // Capture per-run state so a late-completing job from a timed-out
-      // shutdown cannot corrupt a subsequent run's semaphore or inFlight set.
+      // Capture per-run state so a late-completing job from a force shutdown
+      // cannot corrupt a subsequent run's semaphore or inFlight set.
       const inFlight = this.#inFlight;
       const semaphore = this.#semaphore;
 
-      const promise = this.#processJob(jobData).finally(() => {
-        inFlight.delete(promise);
+      const lockToken = jobData.lockToken ?? "";
+      const renewer = this.#startLockRenewer(jobData.id, lockToken);
+      const entry: InFlightEntry = {
+        promise: undefined as unknown as Promise<void>,
+        jobId: jobData.id,
+        lockToken,
+        stopRenewer: renewer.stop,
+      };
+      entry.promise = this.#processJob(jobData, renewer).finally(() => {
+        inFlight.delete(entry);
         semaphore.release();
       });
-      inFlight.add(promise);
+      inFlight.add(entry);
     }
   }
 
-  async #processJob(jobData: JobData): Promise<void> {
+  async #processJob(
+    jobData: JobData,
+    renewer: { stop: () => void },
+  ): Promise<void> {
     this.#emitJobStart(jobData);
+
+    const lockToken = jobData.lockToken ?? "";
 
     let handlerError: unknown;
     try {
       await this.#processor(jobData);
     } catch (err) {
       handlerError = err;
+    } finally {
+      renewer.stop();
     }
 
     if (handlerError === undefined) {
       try {
-        await this.#scheduler.complete(jobData.id);
+        const result = await this.#scheduler.complete(jobData.id, lockToken);
+        if (result === "stale") {
+          try {
+            this.#events.onJobStale?.(jobData, "complete");
+          } catch { /* swallow */ }
+          return;
+        }
       } catch (err) {
         this.#emitError(
           `complete:${jobData.id}`,
@@ -374,7 +532,14 @@ export class Worker<
       ? handlerError.message
       : String(handlerError);
     try {
-      await this.#scheduler.fail(jobData.id, message);
+      const result = await this.#scheduler.fail(jobData.id, message, lockToken);
+      if (result === "stale") {
+        try {
+          this.#events.onJobStale?.(jobData, "fail");
+        } catch { /* swallow */ }
+        this.#emitJobFail(jobData, message);
+        return;
+      }
     } catch (err) {
       this.#emitError(
         `fail:${jobData.id}`,
@@ -382,6 +547,59 @@ export class Worker<
       );
     }
     this.#emitJobFail(jobData, message);
+  }
+
+  /**
+   * Periodically extend the lease on an in-flight job. The renewer stops
+   * itself if the lease is lost (recovery already requeued the job),
+   * which surfaces to operators via onError but does not abort the
+   * handler — the late completion will be detected as "stale".
+   */
+  #startLockRenewer(jobId: string, lockToken: string): { stop: () => void } {
+    if (!lockToken || this.#lockRenewMs <= 0) {
+      return { stop: () => {} };
+    }
+
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        const ok = await this.#scheduler.extendLock(
+          jobId,
+          this.#leaseMs,
+          lockToken,
+        );
+        if (!ok) {
+          this.#emitError(
+            `lease-lost:${jobId}`,
+            new Error(
+              "Lease lost while job was running. Recovery may have requeued it; complete/fail will be no-ops.",
+            ),
+          );
+          stopped = true;
+          return;
+        }
+      } catch (err) {
+        this.#emitError(`extend:${jobId}`, err);
+      }
+      if (!stopped) {
+        timer = setTimeout(tick, this.#lockRenewMs);
+      }
+    };
+
+    timer = setTimeout(tick, this.#lockRenewMs);
+
+    return {
+      stop: () => {
+        stopped = true;
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      },
+    };
   }
 
   #waitForNotification(): Promise<void> {
