@@ -1,4 +1,4 @@
-import { Link } from 'waku';
+import { Link } from "waku";
 
 export default function Home() {
   return (
@@ -16,6 +16,6 @@ export default function Home() {
 
 export const getConfig = async () => {
   return {
-    render: 'static',
+    render: "static",
   };
 };

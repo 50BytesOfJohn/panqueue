@@ -9,7 +9,9 @@ allowed-tools: Bash
 
 ## Overview
 
-Create standardized, semantic git commits using the Conventional Commits specification. Analyze the actual diff to determine appropriate type, scope, and message.
+Create standardized, semantic git commits using the Conventional Commits
+specification. Analyze the actual diff to determine appropriate type, scope, and
+message.
 
 ## Conventional Commit Format
 
@@ -88,7 +90,8 @@ Analyze the diff to determine:
 
 - **Type**: What kind of change is this?
 - **Scope**: What area/module is affected?
-- **Description**: One-line summary of what changed (present tense, imperative mood, <72 chars)
+- **Description**: One-line summary of what changed (present tense, imperative
+  mood, <72 chars)
 
 ### 4. Execute Commit
 
