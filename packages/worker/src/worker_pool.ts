@@ -1,151 +1,280 @@
-import type {
-  ConnectionOptions,
-  JsonSerializable,
-  QueueMap,
-} from "@panqueue/internal";
+import type { PanqueueConfig } from "@panqueue/config";
+import type { ConnectionOptions, QueueMap } from "@panqueue/internal";
+import { notifyKey } from "@panqueue/internal";
+import { isWorkerDefinition, type WorkerDefinition } from "./define_worker.ts";
 import {
-  type Processor,
-  type ShutdownOptions,
-  type ShutdownResult,
-  Worker,
-  type WorkerOptions,
-} from "./worker.ts";
+  RedisConnection,
+  type RedisSubscriberConnection,
+} from "./redis_connection.ts";
+import { WorkerRunner } from "./internal/worker_runner.ts";
 
-/** Options for constructing a WorkerPool. */
-export interface WorkerPoolOptions {
-  /** Redis connection used by all workers in this pool. */
-  connection: ConnectionOptions;
-  /** Default concurrency for all workers. Default: 1. */
-  concurrency?: number;
-  /** Default poll interval in ms for all workers. Default: 5000. */
-  pollInterval?: number;
+/** Options accepted by {@link WorkerPool.shutdown}. */
+export interface ShutdownOptions {
+  /**
+   * When true, wait for in-flight jobs to acknowledge (complete/fail) before
+   * disconnecting Redis. When false (the default), in-flight jobs are
+   * immediately handed back to the queue via an atomic requeue script so
+   * another worker can pick them up without waiting for the lease to expire.
+   *
+   * Force shutdown (the default) relies on the at-least-once contract:
+   * processors must be idempotent because a force-shutdown job is
+   * re-executed on the next worker that claims it. The local handler keeps
+   * running until the process exits, but its eventual complete/fail
+   * no-ops because the lockToken has been cleared.
+   *
+   * Default: `false` (force).
+   */
+  drain?: boolean;
+  /**
+   * Drain timeout in milliseconds. If the drain does not finish in time,
+   * still-in-flight jobs are requeued and Redis is disconnected so the
+   * pool never silently exits under live work. The timeout is a single
+   * pool-wide budget — not per-runner. Ignored when `drain` is false.
+   * Default: no timeout (wait indefinitely).
+   */
+  timeout?: number;
 }
 
-/** Helper type for defining processor functions in separate files. */
-export type QueueProcessor<
-  TQueues extends QueueMap,
-  K extends keyof TQueues & string,
-> = Processor<TQueues[K]>;
-
-interface Registration {
-  processor: Processor;
-  options?: Omit<WorkerOptions, "connection">;
+/** Result returned by `WorkerPool.shutdown`. */
+export interface ShutdownResult {
+  /** The mode this shutdown ran in. */
+  mode: "force" | "drain";
+  /** Whether a drain timed out before all jobs finished (drain mode only). */
+  timedOut: boolean;
+  /** Number of jobs still in-flight when shutdown returned (across all queues). */
+  unfinishedJobs: number;
+  /** Number of in-flight jobs successfully requeued for another worker. */
+  requeued: number;
 }
+
+/** Options for constructing a {@link WorkerPool}. */
+export interface WorkerPoolOptions<TQueues extends QueueMap = QueueMap> {
+  /** Worker definitions to materialize when the pool starts. */
+  workers: WorkerDefinition<TQueues, keyof TQueues & string>[];
+  /**
+   * Redis connection used by every runner in this pool. Overrides
+   * `config.redis` when provided.
+   */
+  connection?: ConnectionOptions;
+}
+
+/** Lifecycle states of the pool. */
+type PoolState = "idle" | "starting" | "running" | "stopping" | "stopped";
 
 /**
- * Manages a group of workers consuming from typed queues.
+ * Owns Redis connections and runs the workers attached at construction
+ * time. A pool opens exactly one command client and one subscriber socket,
+ * shared across every registered queue.
  *
- * `TQueues` is set once on the pool. The `.process()` method infers `K`
- * from the queue name argument, giving full type narrowing on `job.data`.
+ * Pools are single-shot: after `shutdown()` resolves, `start()` rejects.
+ * Construct a fresh pool to run again.
  *
+ * @example
  * ```ts
- * const pool = new WorkerPool<MyQueues>({
- *   connection: { host: "localhost", port: 6379 },
+ * await using pool = new WorkerPool(pq, {
+ *   workers: [emailWorker, imageWorker],
  * });
- * pool.process("emails", async (job) => { job.data.to; });
  * await pool.start();
  * ```
  */
 export class WorkerPool<TQueues extends QueueMap = QueueMap> {
-  readonly #options: WorkerPoolOptions;
-  readonly #registrations = new Map<string, Registration>();
-  readonly #workers = new Map<string, Worker>();
-  #started = false;
+  readonly #connectionOptions: ConnectionOptions;
+  readonly #definitions: ReadonlyArray<WorkerDefinition<TQueues>>;
 
-  constructor(options: WorkerPoolOptions) {
-    this.#options = options;
-  }
+  #state: PoolState = "idle";
+  #startPromise: Promise<void> | null = null;
+  #shutdownPromise: Promise<ShutdownResult> | null = null;
 
-  /** Register a processor for a queue. Returns `this` for chaining. */
-  process<K extends keyof TQueues & string>(
-    queueId: K,
-    processor: Processor<TQueues[K]>,
-    options?: Omit<WorkerOptions<TQueues[K]>, "connection">,
-  ): this {
-    if (this.#started) {
-      throw new Error("Cannot register processors after the pool has started");
-    }
-    if (this.#registrations.has(queueId)) {
-      throw new Error(`Processor already registered for queue "${queueId}"`);
-    }
-    this.#registrations.set(queueId, {
-      processor: processor as Processor,
-      options: options as Omit<WorkerOptions, "connection"> | undefined,
-    });
-    return this;
-  }
+  #redis: RedisConnection | null = null;
+  #subscriber: RedisSubscriberConnection | null = null;
+  #runners: WorkerRunner[] = [];
 
-  /** Start all registered workers. */
-  async start(): Promise<void> {
-    if (this.#started) {
-      throw new Error("Pool is already started");
-    }
-    if (this.#registrations.size === 0) {
-      throw new Error("No processors registered");
+  constructor(
+    config: PanqueueConfig<TQueues>,
+    options: WorkerPoolOptions<TQueues>,
+  ) {
+    if (!options.workers || options.workers.length === 0) {
+      throw new Error("WorkerPool requires at least one worker definition");
     }
 
-    this.#started = true;
-
-    for (const [queueId, reg] of this.#registrations) {
-      const worker = new Worker(queueId, reg.processor, {
-        connection: this.#options.connection,
-        concurrency: reg.options?.concurrency ?? this.#options.concurrency,
-        pollInterval: reg.options?.pollInterval ?? this.#options.pollInterval,
-        events: reg.options?.events,
-      });
-      this.#workers.set(queueId, worker);
-    }
-
-    const entries = [...this.#workers.entries()];
-    const results = await Promise.allSettled(
-      entries.map(([, w]) => w.start()),
-    );
-
-    const firstFailure = results.findIndex((r) => r.status === "rejected");
-    if (firstFailure !== -1) {
-      // Shut down workers that started successfully
-      const shutdowns: Promise<ShutdownResult>[] = [];
-      for (let i = 0; i < results.length; i++) {
-        if (results[i].status === "fulfilled") {
-          shutdowns.push(entries[i][1].shutdown());
-        }
+    const seen = new Set<string>();
+    for (const def of options.workers) {
+      if (!isWorkerDefinition(def)) {
+        throw new TypeError(
+          "WorkerPool workers must be created with defineWorker(...)",
+        );
       }
-      await Promise.allSettled(shutdowns);
-      this.#workers.clear();
-      this.#registrations.clear();
-      this.#started = false;
+      if (seen.has(def.queueId)) {
+        throw new Error(
+          `Duplicate worker definition for queue "${def.queueId}"`,
+        );
+      }
+      seen.add(def.queueId);
+    }
 
-      throw (results[firstFailure] as PromiseRejectedResult).reason;
+    this.#connectionOptions = options.connection ?? config.redis;
+    this.#definitions = options.workers;
+  }
+
+  /** Number of registered queues. */
+  get size(): number {
+    return this.#definitions.length;
+  }
+
+  /** Open Redis connections, subscribe to notifications, and start every runner. */
+  start(): Promise<void> {
+    if (this.#state === "running") return Promise.resolve();
+    if (this.#startPromise) return this.#startPromise;
+    if (this.#state !== "idle") {
+      return Promise.reject(
+        new Error(`Cannot start pool in state "${this.#state}"`),
+      );
+    }
+
+    this.#startPromise = this.#doStart().finally(() => {
+      this.#startPromise = null;
+    });
+    return this.#startPromise;
+  }
+
+  async #doStart(): Promise<void> {
+    this.#state = "starting";
+
+    const redis = new RedisConnection(this.#connectionOptions);
+    let subscriber: RedisSubscriberConnection | null = null;
+    const subscribedChannels: string[] = [];
+
+    try {
+      await redis.connect();
+      subscriber = await redis.duplicate();
+
+      const runners = this.#definitions.map((def) =>
+        new WorkerRunner(def.queueId, def.processor, def.options, redis.client)
+      );
+
+      for (const runner of runners) {
+        const channel = notifyKey(runner.queueId);
+        await subscriber.client.subscribe(channel, () => runner.wake());
+        subscribedChannels.push(channel);
+      }
+
+      for (const runner of runners) runner.start();
+
+      this.#redis = redis;
+      this.#subscriber = subscriber;
+      this.#runners = runners;
+      this.#state = "running";
+    } catch (err) {
+      if (subscriber && subscribedChannels.length > 0) {
+        try {
+          await subscriber.client.unsubscribe(subscribedChannels);
+        } catch { /* ignore */ }
+      }
+      try {
+        await subscriber?.disconnect();
+      } catch { /* ignore */ }
+      try {
+        await redis.disconnect();
+      } catch { /* ignore */ }
+      this.#state = "stopped";
+      throw err;
     }
   }
 
   /**
-   * Shut down all workers. Defaults to force shutdown — see
-   * {@link Worker.shutdown} for the difference between force and drain modes.
+   * Shut down every runner and disconnect Redis. Defaults to force mode —
+   * see {@link ShutdownOptions}.
+   *
+   * Idempotent: subsequent calls return the same result.
    */
-  async shutdown(options?: ShutdownOptions): Promise<ShutdownResult> {
-    const mode: "force" | "drain" = options?.drain ? "drain" : "force";
-    if (!this.#started) {
-      return { mode, timedOut: false, unfinishedJobs: 0, requeued: 0 };
+  shutdown(options?: ShutdownOptions): Promise<ShutdownResult> {
+    const drain = options?.drain ?? false;
+    const mode: "force" | "drain" = drain ? "drain" : "force";
+
+    if (this.#shutdownPromise) return this.#shutdownPromise;
+
+    if (this.#state === "idle") {
+      const result: ShutdownResult = {
+        mode,
+        timedOut: false,
+        unfinishedJobs: 0,
+        requeued: 0,
+      };
+      this.#state = "stopped";
+      this.#shutdownPromise = Promise.resolve(result);
+      return this.#shutdownPromise;
     }
 
-    const results = await Promise.allSettled(
-      [...this.#workers.values()].map((w) => w.shutdown(options)),
-    );
+    this.#shutdownPromise = this.#doShutdown(mode, options);
+    return this.#shutdownPromise;
+  }
+
+  async #doShutdown(
+    mode: "force" | "drain",
+    options?: ShutdownOptions,
+  ): Promise<ShutdownResult> {
+    if (this.#startPromise) {
+      try {
+        await this.#startPromise;
+      } catch { /* ignore */ }
+    }
+
+    if (this.#state !== "running") {
+      const result: ShutdownResult = {
+        mode,
+        timedOut: false,
+        unfinishedJobs: 0,
+        requeued: 0,
+      };
+      this.#state = "stopped";
+      return result;
+    }
+
+    this.#state = "stopping";
+    const runners = this.#runners;
+
+    await Promise.allSettled(runners.map((r) => r.stopClaiming()));
 
     let timedOut = false;
-    let unfinishedJobs = 0;
-    let requeued = 0;
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        if (result.value.timedOut) timedOut = true;
-        unfinishedJobs += result.value.unfinishedJobs;
-        requeued += result.value.requeued;
-      }
+
+    if (mode === "drain") {
+      const drainResults = await Promise.all(
+        runners.map((r) => r.drainInflight(options?.timeout)),
+      );
+      timedOut = drainResults.some((r) => r.timedOut);
     }
 
-    this.#workers.clear();
-    this.#started = false;
+    const reason = mode === "drain" ? "shutdown-timeout" : "shutdown";
+    const requeueResults = await Promise.all(
+      runners.map((r) => r.forceRequeueInflight(reason)),
+    );
+
+    let unfinishedJobs = 0;
+    let requeued = 0;
+    for (const r of requeueResults) {
+      unfinishedJobs += r.unfinishedJobs;
+      requeued += r.requeued;
+    }
+
+    const channels = runners.map((r) => notifyKey(r.queueId));
+    if (this.#subscriber && channels.length > 0) {
+      try {
+        await this.#subscriber.client.unsubscribe(channels);
+      } catch { /* ignore */ }
+    }
+    try {
+      await this.#subscriber?.disconnect();
+    } catch { /* ignore */ }
+    try {
+      await this.#redis?.disconnect();
+    } catch { /* ignore */ }
+
+    for (const runner of runners) runner.finalize();
+
+    this.#redis = null;
+    this.#subscriber = null;
+    this.#runners = [];
+    this.#state = "stopped";
 
     return { mode, timedOut, unfinishedJobs, requeued };
   }

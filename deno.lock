@@ -91,6 +91,11 @@
   },
   "workspace": {
     "members": {
+      "demo": {
+        "dependencies": [
+          "npm:redis@5"
+        ]
+      },
       "packages/client": {
         "dependencies": [
           "npm:redis@5"

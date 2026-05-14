@@ -4,30 +4,39 @@ import { defineScript } from "redis";
  * Lua script used by force shutdown to atomically hand an in-flight job
  * back to the queue without waiting for its lease to expire.
  *
- * Mirrors the recover script's retry/fail decision so a force-shutdown is
- * indistinguishable from a stall, with one exception: it is invoked
- * directly by the worker that owns the lease and is fenced on lockToken
- * rather than on lease deadline.
+ * Force shutdown is an ownership handoff, not a handler failure or stall.
  *
  * 1. HGET the job hash; if missing, return "missing".
  * 2. If the stored lockToken does not match the caller's, return "stale"
  *    (recovery already grabbed it — nothing to requeue).
  * 3. ZREM the job from the active ZSET. Clear lockToken/leaseDeadline.
- * 4. Treat the killed claim as a consumed attempt:
- *    - if attempts < maxRetries + 1: LPUSH to waiting, PUBLISH notify.
- *    - else: SADD failed with finishedAt and the supplied reason.
+ * 4. Record lastRequeuedAt/lastRequeueReason, mark waiting, LPUSH, PUBLISH.
  *
- * Returns "waiting", "failed", "stale", or "missing".
+ * Returns "waiting", "stale", "missing", or "corrupt".
  */
 export const REQUEUE_ACTIVE_SCRIPT = defineScript({
-  NUMBER_OF_KEYS: 5,
+  NUMBER_OF_KEYS: 6,
   SCRIPT: `
 local raw = redis.call('HGET', KEYS[3], ARGV[1])
 if not raw then
   return 'missing'
 end
 
-local job = cjson.decode(raw)
+local ok, job = pcall(cjson.decode, raw)
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+
+if not ok then
+  redis.call('ZADD', KEYS[5], now, ARGV[1])
+  redis.call('HSET', KEYS[6], ARGV[1], cjson.encode({
+    jobId = ARGV[1],
+    reason = 'invalid-json',
+    detectedAt = now,
+    raw = string.sub(raw, 1, 4096)
+  }))
+  return 'corrupt'
+end
+
 if job['lockToken'] ~= ARGV[2] then
   return 'stale'
 end
@@ -36,24 +45,14 @@ redis.call('ZREM', KEYS[1], ARGV[1])
 
 job['lockToken'] = nil
 job['leaseDeadline'] = nil
-job['failedReason'] = ARGV[3]
+job['lastRequeuedAt'] = now
+job['lastRequeueReason'] = ARGV[3]
+job['status'] = 'waiting'
 
-local maxRetries = job['maxRetries'] or 0
-local attempts = job['attempts'] or 1
-
-if attempts < maxRetries + 1 then
-  job['status'] = 'waiting'
-  redis.call('HSET', KEYS[3], ARGV[1], cjson.encode(job))
-  redis.call('LPUSH', KEYS[2], ARGV[1])
-  redis.call('PUBLISH', KEYS[4], ARGV[1])
-  return 'waiting'
-else
-  job['status'] = 'failed'
-  job['finishedAt'] = tonumber(ARGV[4])
-  redis.call('HSET', KEYS[3], ARGV[1], cjson.encode(job))
-  redis.call('SADD', KEYS[5], ARGV[1])
-  return 'failed'
-end
+redis.call('HSET', KEYS[3], ARGV[1], cjson.encode(job))
+redis.call('LPUSH', KEYS[2], ARGV[1])
+redis.call('PUBLISH', KEYS[4], ARGV[1])
+return 'waiting'
 `,
   /**
    * @param parser     - command parser (injected by node-redis)
@@ -61,11 +60,11 @@ end
    * @param waitingKey - waiting list   (e.g. {q:emails}:waiting)
    * @param jobsKey    - jobs hash      (e.g. {q:emails}:jobs)
    * @param notifyKey  - notify channel (e.g. {q:emails}:notify)
-   * @param failedKey  - failed set     (e.g. {q:emails}:failed)
+   * @param corruptKey - corrupt ZSET   (e.g. {q:emails}:corrupt)
+   * @param corruptDataKey - corrupt data hash
    * @param jobId      - job ID
    * @param lockToken  - lock token held by the caller
    * @param reason     - failedReason text written on the job hash
-   * @param now        - current timestamp (ms), used as finishedAt on terminal failure
    */
   parseCommand(
     parser,
@@ -73,14 +72,21 @@ end
     waitingKey: string,
     jobsKey: string,
     notifyKey: string,
-    failedKey: string,
+    corruptKey: string,
+    corruptDataKey: string,
     jobId: string,
     lockToken: string,
     reason: string,
-    now: string,
   ) {
-    parser.pushKeys([activeKey, waitingKey, jobsKey, notifyKey, failedKey]);
-    parser.push(jobId, lockToken, reason, now);
+    parser.pushKeys([
+      activeKey,
+      waitingKey,
+      jobsKey,
+      notifyKey,
+      corruptKey,
+      corruptDataKey,
+    ]);
+    parser.push(jobId, lockToken, reason);
   },
   transformReply(reply: unknown) {
     return reply;

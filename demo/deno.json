@@ -2,5 +2,8 @@
   "tasks": {
     "enqueue": "deno run --allow-net enqueue_jobs.ts",
     "worker": "deno run --allow-net process_jobs.ts"
+  },
+  "imports": {
+    "redis": "npm:redis@^5"
   }
 }

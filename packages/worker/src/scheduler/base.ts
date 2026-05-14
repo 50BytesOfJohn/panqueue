@@ -2,19 +2,34 @@ import type { JobData, JsonSerializable } from "@panqueue/internal";
 import {
   activeKey,
   completedKey,
+  corruptDataKey,
+  corruptKey,
   failedKey,
   jobsKey,
   notifyKey,
   waitingKey,
 } from "@panqueue/internal";
-import type { RedisClient } from "../redis_connection.ts";
+import type { PanqueueWorkerClient } from "../redis_connection.ts";
 
 /** Outcome of a complete() call. */
-export type CompleteResult = "completed" | "stale" | "missing";
+export type CompleteResult = "completed" | "stale" | "missing" | "corrupt";
 /** Outcome of a fail() call. */
-export type FailResult = "waiting" | "failed" | "stale" | "missing";
+export type FailResult = "waiting" | "failed" | "stale" | "missing" | "corrupt";
 /** Outcome of a requeueActive() call (force-shutdown handoff). */
-export type RequeueActiveResult = "waiting" | "failed" | "stale" | "missing";
+export type RequeueActiveResult = "waiting" | "stale" | "missing" | "corrupt";
+/** Outcome of an extendLock() call. */
+export type ExtendLockResult = "extended" | "stale" | "missing" | "corrupt";
+/** Corrupt job result returned when a script quarantines unreadable JSON. */
+export interface CorruptJobResult {
+  status: "corrupt";
+  jobId: string;
+  reason: string;
+}
+/** Outcome of a claim call. */
+export type ClaimResult<T extends JsonSerializable = JsonSerializable> =
+  | JobData<T>
+  | CorruptJobResult
+  | null;
 
 /**
  * Abstract base class for Redis job scheduling operations.
@@ -27,15 +42,15 @@ export abstract class BaseJobScheduler<
   T extends JsonSerializable = JsonSerializable,
 > {
   protected readonly queueId: string;
-  protected readonly client: RedisClient;
+  protected readonly client: PanqueueWorkerClient;
 
-  constructor(queueId: string, client: RedisClient) {
+  constructor(queueId: string, client: PanqueueWorkerClient) {
     this.queueId = queueId;
     this.client = client;
   }
 
   /** Claim the next available job. Mode-specific implementation. */
-  abstract claim(leaseMs: number): Promise<JobData<T> | null>;
+  abstract claim(leaseMs: number): Promise<ClaimResult<T>>;
 
   /** Mark a job as completed; lockToken fences against stalled recovery. */
   async complete(jobId: string, lockToken: string): Promise<CompleteResult> {
@@ -43,12 +58,13 @@ export abstract class BaseJobScheduler<
       activeKey(this.queueId),
       completedKey(this.queueId),
       jobsKey(this.queueId),
+      corruptKey(this.queueId),
+      corruptDataKey(this.queueId),
       jobId,
-      String(Date.now()),
       lockToken,
     );
 
-    return result as CompleteResult;
+    return parseCompleteResult(result);
   }
 
   /** Mark a job as failed. Returns the resulting status. */
@@ -63,13 +79,14 @@ export abstract class BaseJobScheduler<
       waitingKey(this.queueId),
       jobsKey(this.queueId),
       notifyKey(this.queueId),
+      corruptKey(this.queueId),
+      corruptDataKey(this.queueId),
       jobId,
-      String(Date.now()),
       error,
       lockToken,
     );
 
-    return result as FailResult;
+    return parseFailResult(result);
   }
 
   /** Extend the lease deadline on an active job. Returns true if extended. */
@@ -77,15 +94,17 @@ export abstract class BaseJobScheduler<
     jobId: string,
     leaseMs: number,
     lockToken: string,
-  ): Promise<boolean> {
+  ): Promise<ExtendLockResult> {
     const result = await this.client.extendLock(
       activeKey(this.queueId),
       jobsKey(this.queueId),
+      corruptKey(this.queueId),
+      corruptDataKey(this.queueId),
       jobId,
-      String(Date.now() + leaseMs),
       lockToken,
+      String(leaseMs),
     );
-    return result === 1;
+    return parseExtendLockResult(result);
   }
 
   /**
@@ -103,13 +122,13 @@ export abstract class BaseJobScheduler<
       waitingKey(this.queueId),
       jobsKey(this.queueId),
       notifyKey(this.queueId),
-      failedKey(this.queueId),
+      corruptKey(this.queueId),
+      corruptDataKey(this.queueId),
       jobId,
       lockToken,
       reason,
-      String(Date.now()),
     );
-    return result as RequeueActiveResult;
+    return parseRequeueActiveResult(result);
   }
 
   /** Recover stalled jobs whose lease has expired. Returns recovered job IDs. */
@@ -120,10 +139,59 @@ export abstract class BaseJobScheduler<
       jobsKey(this.queueId),
       notifyKey(this.queueId),
       failedKey(this.queueId),
-      String(Date.now()),
+      corruptKey(this.queueId),
+      corruptDataKey(this.queueId),
       String(batchSize),
       reason,
     );
-    return (result ?? []) as string[];
+    return parseStringArray(result);
   }
+}
+
+function parseCompleteResult(result: unknown): CompleteResult {
+  if (
+    result === "completed" || result === "stale" || result === "missing" ||
+    result === "corrupt"
+  ) return result;
+  throw new Error(`Unexpected complete result: ${String(result)}`);
+}
+
+function parseFailResult(result: unknown): FailResult {
+  if (
+    result === "waiting" || result === "failed" || result === "stale" ||
+    result === "missing" || result === "corrupt"
+  ) return result;
+  throw new Error(`Unexpected fail result: ${String(result)}`);
+}
+
+function parseExtendLockResult(result: unknown): ExtendLockResult {
+  if (
+    result === "extended" || result === "stale" || result === "missing" ||
+    result === "corrupt"
+  ) return result;
+  throw new Error(`Unexpected extendLock result: ${String(result)}`);
+}
+
+function parseRequeueActiveResult(result: unknown): RequeueActiveResult {
+  if (
+    result === "waiting" || result === "stale" || result === "missing" ||
+    result === "corrupt"
+  ) return result;
+  throw new Error(`Unexpected requeueActive result: ${String(result)}`);
+}
+
+function parseStringArray(result: unknown): string[] {
+  if (result === null || result === undefined) return [];
+  if (!Array.isArray(result)) {
+    throw new Error(`Unexpected recover result: ${String(result)}`);
+  }
+
+  const values: string[] = [];
+  for (const item of result) {
+    if (typeof item !== "string") {
+      throw new Error(`Unexpected recover item: ${String(item)}`);
+    }
+    values.push(item);
+  }
+  return values;
 }

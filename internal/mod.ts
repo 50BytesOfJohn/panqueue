@@ -10,6 +10,8 @@ export type {
 export {
   activeKey,
   completedKey,
+  corruptDataKey,
+  corruptKey,
   delayedKey,
   failedKey,
   jobsKey,

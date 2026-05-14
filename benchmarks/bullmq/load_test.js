@@ -4,7 +4,7 @@
  * Run: node load_test.js
  */
 
-import { Queue, Worker, FlowProducer } from "bullmq";
+import { FlowProducer, Queue, Worker } from "bullmq";
 import { createClient } from "redis";
 
 const CONNECTION = { host: "localhost", port: 6399 };
@@ -91,7 +91,9 @@ async function scenario1_throughput() {
   const enqueueMs = performance.now() - enqueueStart;
 
   console.log(
-    `  Enqueue: ${fmt(COUNT, "jobs")} in ${fmtMs(enqueueMs)} (${fmt(Math.round(COUNT / (enqueueMs / 1000)), "jobs/s")})`,
+    `  Enqueue: ${fmt(COUNT, "jobs")} in ${fmtMs(enqueueMs)} (${
+      fmt(Math.round(COUNT / (enqueueMs / 1000)), "jobs/s")
+    })`,
   );
 
   // Process phase
@@ -126,7 +128,9 @@ async function scenario1_throughput() {
   const mem = await redisInfo();
 
   console.log(
-    `  Process: ${fmt(COUNT, "jobs")} in ${fmtMs(processMs)} (${fmt(Math.round(COUNT / (processMs / 1000)), "jobs/s")})`,
+    `  Process: ${fmt(COUNT, "jobs")} in ${fmtMs(processMs)} (${
+      fmt(Math.round(COUNT / (processMs / 1000)), "jobs/s")
+    })`,
   );
   console.log(`  Concurrency: ${CONCURRENCY}`);
   console.log(
@@ -134,8 +138,8 @@ async function scenario1_throughput() {
   );
   console.log(`  Memory: ${mem.usedMemory}`);
 
-  const ok =
-    stats.completed === COUNT && stats.waiting === 0 && stats.active === 0;
+  const ok = stats.completed === COUNT && stats.waiting === 0 &&
+    stats.active === 0;
   console.log(
     ok
       ? "  ✅ All jobs completed"
@@ -199,7 +203,9 @@ async function scenario2_concurrencyScaling() {
     const throughput = Math.round(COUNT / (ms / 1000));
     results.push({ concurrency, processMs: ms, throughput });
     console.log(
-      `  concurrency=${String(concurrency).padStart(3)}  → ${fmtMs(ms).padStart(8)}  (${fmt(throughput, "jobs/s")})`,
+      `  concurrency=${String(concurrency).padStart(3)}  → ${
+        fmtMs(ms).padStart(8)
+      }  (${fmt(throughput, "jobs/s")})`,
     );
   }
 
@@ -238,7 +244,9 @@ async function scenario3_mixedFailures() {
     );
   }
   console.log(
-    `  Enqueued ${COUNT} jobs (${expectedFails} will always fail, ${COUNT - expectedFails} will succeed)`,
+    `  Enqueued ${COUNT} jobs (${expectedFails} will always fail, ${
+      COUNT - expectedFails
+    } will succeed)`,
   );
 
   let successCount = 0;
@@ -288,14 +296,17 @@ async function scenario3_mixedFailures() {
     `  Total handler invocations: ${totalAttempts} (includes retries)`,
   );
   console.log(
-    `  Expected retry invocations: ~${expectedFails * (RETRIES + 1)} for failing + ${COUNT - expectedFails} for passing = ~${expectedFails * (RETRIES + 1) + COUNT - expectedFails}`,
+    `  Expected retry invocations: ~${
+      expectedFails * (RETRIES + 1)
+    } for failing + ${COUNT - expectedFails} for passing = ~${
+      expectedFails * (RETRIES + 1) + COUNT - expectedFails
+    }`,
   );
   console.log(
     `  Redis: waiting=${stats.waiting} active=${stats.active}`,
   );
 
-  const ok =
-    successCount + failCount === COUNT &&
+  const ok = successCount + failCount === COUNT &&
     stats.waiting === 0 &&
     stats.active === 0;
   console.log(ok ? "  ✅ All jobs accounted for" : "  ❌ Job count mismatch");
@@ -372,17 +383,23 @@ async function scenario4_simulatedWork() {
     `  Total simulated work: ${fmtMs(totalWorkMs)} (serial equivalent)`,
   );
   console.log(
-    `  Effective speedup: ${speedup.toFixed(1)}x from concurrency=${CONCURRENCY}`,
+    `  Effective speedup: ${
+      speedup.toFixed(1)
+    }x from concurrency=${CONCURRENCY}`,
   );
   console.log(
-    `  Overhead per job: ~${((processMs - totalWorkMs / CONCURRENCY) / COUNT).toFixed(2)}ms`,
+    `  Overhead per job: ~${
+      ((processMs - totalWorkMs / CONCURRENCY) / COUNT).toFixed(2)
+    }ms`,
   );
   console.log(
     `  Redis: completed=${stats.completed} failed=${stats.failed}`,
   );
 
   const ok = stats.completed === COUNT;
-  console.log(ok ? "  ✅ All jobs completed" : `  ❌ Expected ${COUNT} completed`);
+  console.log(
+    ok ? "  ✅ All jobs completed" : `  ❌ Expected ${COUNT} completed`,
+  );
 
   await queue.close();
   return { processMs, totalWorkMs, speedup, count: COUNT };
@@ -445,7 +462,9 @@ async function scenario5_burstDuringProcessing() {
   }
   const burstMs = performance.now() - burstStart;
   console.log(
-    `  Live burst: ${LIVE} jobs enqueued in ${fmtMs(burstMs)} while worker running`,
+    `  Live burst: ${LIVE} jobs enqueued in ${
+      fmtMs(burstMs)
+    } while worker running`,
   );
 
   await allDone;
@@ -454,7 +473,9 @@ async function scenario5_burstDuringProcessing() {
 
   const stats = await redisQueueStats(QUEUE_NAME);
   console.log(
-    `  Total: ${fmt(TOTAL, "jobs")} in ${fmtMs(totalMs)} (${fmt(Math.round(TOTAL / (totalMs / 1000)), "jobs/s")})`,
+    `  Total: ${fmt(TOTAL, "jobs")} in ${fmtMs(totalMs)} (${
+      fmt(Math.round(TOTAL / (totalMs / 1000)), "jobs/s")
+    })`,
   );
   console.log(
     `  Redis: completed=${stats.completed} waiting=${stats.waiting} active=${stats.active}`,
@@ -462,9 +483,7 @@ async function scenario5_burstDuringProcessing() {
 
   const ok = stats.completed === TOTAL;
   console.log(
-    ok
-      ? "  ✅ All jobs completed"
-      : `  ❌ Expected ${TOTAL} completed`,
+    ok ? "  ✅ All jobs completed" : `  ❌ Expected ${TOTAL} completed`,
   );
 
   await queue.close();
@@ -486,16 +505,24 @@ console.log("\n═════════════════════�
 console.log("  Summary");
 console.log("══════════════════════════════════════════════════════════");
 console.log(
-  `  S1 throughput (no-op, c=${s1.concurrency}): ${fmt(Math.round(s1.count / (s1.processMs / 1000)), "jobs/s")}`,
+  `  S1 throughput (no-op, c=${s1.concurrency}): ${
+    fmt(Math.round(s1.count / (s1.processMs / 1000)), "jobs/s")
+  }`,
 );
 console.log(
-  `  S2 scaling: ${s2.map((r) => `c=${r.concurrency}→${r.throughput}`).join(", ")} jobs/s`,
+  `  S2 scaling: ${
+    s2.map((r) => `c=${r.concurrency}→${r.throughput}`).join(", ")
+  } jobs/s`,
 );
 console.log(
-  `  S3 mixed: ${s3.completed} ok + ${s3.failed} failed in ${fmtMs(s3.ms)}, ${s3.totalAttempts} total attempts`,
+  `  S3 mixed: ${s3.completed} ok + ${s3.failed} failed in ${
+    fmtMs(s3.ms)
+  }, ${s3.totalAttempts} total attempts`,
 );
 console.log(
-  `  S4 work sim: ${s4.speedup.toFixed(1)}x speedup, ~${((s4.processMs - s4.totalWorkMs / 50) / s4.count).toFixed(2)}ms overhead/job`,
+  `  S4 work sim: ${s4.speedup.toFixed(1)}x speedup, ~${
+    ((s4.processMs - s4.totalWorkMs / 50) / s4.count).toFixed(2)
+  }ms overhead/job`,
 );
 console.log(
   "══════════════════════════════════════════════════════════\n",

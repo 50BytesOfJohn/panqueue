@@ -1,26 +1,28 @@
 import { expect } from "jsr:@std/expect";
 import { assertSpyCalls, type Spy, spy, stub } from "jsr:@std/testing/mock";
 import {
-  type RedisClient,
-  RedisConnection,
   _internals,
+  type PanqueueProducerClient,
+  RedisConnection,
 } from "./redis_connection.ts";
 
+type FakeClient = PanqueueProducerClient & {
+  connect: Spy;
+  disconnect: Spy;
+  on: Spy;
+};
+
 /** Creates a fake Redis client with spied methods. */
-function createFakeClient() {
+function createFakeClient(): FakeClient {
   return {
     connect: spy(() => Promise.resolve()),
     disconnect: spy(() => Promise.resolve()),
     on: spy(),
-  } as unknown as RedisClient & {
-    connect: Spy;
-    disconnect: Spy;
-    on: Spy;
-  };
+  } as unknown as FakeClient;
 }
 
 /** Stubs createClient to return the given fake, returns the stub for assertions. */
-function stubCreateClient(fakeClient: RedisClient) {
+function stubCreateClient(fakeClient: FakeClient) {
   return stub(
     _internals,
     "createClient",
@@ -148,26 +150,6 @@ Deno.test("Symbol.asyncDispose disconnects the client", async () => {
 
   // Assert
   expect(() => conn.client).toThrow();
-});
-
-Deno.test("duplicate() returns a separate connected instance", async () => {
-  // Arrange
-  const fakeClient1 = createFakeClient();
-  const fakeClient2 = createFakeClient();
-  let callCount = 0;
-  // deno-lint-ignore no-explicit-any
-  using _stub = stub(_internals, "createClient", (() => {
-    callCount++;
-    return callCount === 1 ? fakeClient1 : fakeClient2;
-  }) as any);
-  const conn = new RedisConnection("redis://localhost:6379");
-  await conn.connect();
-
-  // Act
-  const dup = await conn.duplicate();
-
-  // Assert
-  expect(dup.client).not.toBe(conn.client);
 });
 
 Deno.test("connect() passes URL string to createClient", async () => {

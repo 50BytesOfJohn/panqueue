@@ -190,14 +190,6 @@ await pool.start();
 await pool.shutdown();
 ```
 
-Inline registration remains available for compact single-file workers:
-
-```ts
-const pool = new WorkerPool(pq);
-
-pool.register("email", async (job) => { ... });
-```
-
 `WorkerPool` uses the Redis connection from `pq.redis` unless an override is
 provided. The connection config shape stays the same as the shared config:
 
@@ -562,9 +554,10 @@ waiting between them.
 
 - **Force (default):** for each in-flight job, run an atomic `requeue_active`
   Lua script fenced on lockToken — ZREM from active, clear
-  lockToken/leaseDeadline, LPUSH back to waiting (or move to failed when retries
-  are exhausted), PUBLISH notify. Then disconnect. Local handlers continue
-  running but their complete/fail are no-ops.
+  lockToken/leaseDeadline, LPUSH back to waiting, PUBLISH notify. Force shutdown
+  is an ownership handoff and does not consume `failures` or `stalls`. Then
+  disconnect. Local handlers continue running but their complete/fail are
+  no-ops.
 - **Drain (opt-in):** wait for semaphore permits to return; on optional
   `timeout`, fall through to the force handoff.
 

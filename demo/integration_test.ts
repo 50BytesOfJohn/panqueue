@@ -1,13 +1,19 @@
 /**
- * Integration test script — exercises the new Worker lifecycle features
+ * Integration test script — exercises the WorkerPool lifecycle features
  * against real Redis on port 6399.
  *
  * Run: deno run --allow-net demo/integration_test.ts
  */
 
 import { QueueClient } from "@panqueue/client";
-import { Worker } from "@panqueue/worker";
-import type { ShutdownResult, WorkerState } from "@panqueue/worker";
+import { definePanqueueConfig } from "@panqueue/config";
+import {
+  defineWorker,
+  type ShutdownResult,
+  WorkerPool,
+  type WorkerState,
+} from "@panqueue/worker";
+import { withInspector } from "./_inspect.ts";
 
 const CONNECTION = { host: "localhost", port: 6399 };
 
@@ -16,6 +22,15 @@ type TestQueues = {
   slow: { delay: number };
   failing: { shouldFail: boolean };
 };
+
+const pq = definePanqueueConfig<TestQueues>({
+  redis: CONNECTION,
+  queues: {
+    emails: { mode: "global" },
+    slow: { mode: "global" },
+    failing: { mode: "global" },
+  },
+});
 
 let passed = 0;
 let failed = 0;
@@ -31,69 +46,49 @@ function assert(condition: boolean, msg: string) {
 }
 
 async function flushRedis() {
-  const client = new QueueClient<TestQueues>({ connection: CONNECTION });
-  await client.connect();
-  await client.redis.client.sendCommand(["FLUSHDB"]);
-  await client.disconnect();
+  await withInspector(CONNECTION, (r) => r.sendCommand(["FLUSHDB"]));
 }
 
 // ──────────────────────────────────────────────────────────
-// Test 1: State machine transitions — happy path
+// Test 1: Per-runner state machine transitions — happy path
 // ──────────────────────────────────────────────────────────
 async function test1_stateTransitions() {
-  console.log("\n🔬 Test 1: State machine transitions (happy path)");
+  console.log(
+    "\n🔬 Test 1: Per-runner state transitions (idle→running→stopping→stopped)",
+  );
   await flushRedis();
 
   const transitions: [WorkerState, WorkerState][] = [];
 
-  const worker = new Worker<TestQueues>("emails", async () => {}, {
-    connection: CONNECTION,
+  const w = defineWorker(pq, "emails", async () => {}, {
     pollInterval: 100,
     events: {
       onStateChange: (from, to) => transitions.push([from, to]),
     },
   });
 
-  assert(
-    worker.state === "idle",
-    `Initial state is "idle" (got "${worker.state}")`,
-  );
-  assert(!worker.isRunning, "isRunning is false before start");
+  const pool = new WorkerPool(pq, { workers: [w] });
 
-  await worker.start();
-  assert(
-    worker.state === "running",
-    `State after start is "running" (got "${worker.state}")`,
-  );
-  assert(worker.isRunning, "isRunning is true after start");
+  await pool.start();
+  const result = await pool.shutdown();
 
-  const result = await worker.shutdown();
-  assert(
-    worker.state === "stopped",
-    `State after shutdown is "stopped" (got "${worker.state}")`,
-  );
-  assert(!worker.isRunning, "isRunning is false after shutdown");
   assert(!result.timedOut, "Clean shutdown did not time out");
   assert(result.unfinishedJobs === 0, "No unfinished jobs");
 
   assert(
-    transitions.length === 4,
-    `4 transitions fired (got ${transitions.length})`,
+    transitions.length === 3,
+    `3 runner transitions fired (got ${transitions.length})`,
   );
   assert(
-    transitions[0][0] === "idle" && transitions[0][1] === "starting",
-    "idle → starting",
+    transitions[0][0] === "idle" && transitions[0][1] === "running",
+    "idle → running",
   );
   assert(
-    transitions[1][0] === "starting" && transitions[1][1] === "running",
-    "starting → running",
-  );
-  assert(
-    transitions[2][0] === "running" && transitions[2][1] === "stopping",
+    transitions[1][0] === "running" && transitions[1][1] === "stopping",
     "running → stopping",
   );
   assert(
-    transitions[3][0] === "stopping" && transitions[3][1] === "stopped",
+    transitions[2][0] === "stopping" && transitions[2][1] === "stopped",
     "stopping → stopped",
   );
 }
@@ -105,7 +100,6 @@ async function test2_processWithEvents() {
   console.log("\n🔬 Test 2: Process jobs with onJobStart/onJobComplete events");
   await flushRedis();
 
-  // Enqueue 3 jobs
   const client = new QueueClient<TestQueues>({ connection: CONNECTION });
   const ids: string[] = [];
   for (let i = 0; i < 3; i++) {
@@ -118,11 +112,9 @@ async function test2_processWithEvents() {
   }
   console.log(`  Enqueued ${ids.length} jobs: ${ids.join(", ")}`);
 
-  // Verify waiting list
-  const waitingBefore = await client.redis.client.lRange(
-    "{q:emails}:waiting",
-    0,
-    -1,
+  const waitingBefore = await withInspector(
+    CONNECTION,
+    (r) => r.lRange("{q:emails}:waiting", 0, -1),
   );
   assert(
     waitingBefore.length === 3,
@@ -135,33 +127,28 @@ async function test2_processWithEvents() {
     void
   >();
 
-  const worker = new Worker<TestQueues>(
-    "emails",
-    async (job) => {
-      // Simulate quick work
-      await new Promise((r) => setTimeout(r, 50));
-    },
-    {
-      connection: CONNECTION,
-      concurrency: 2,
-      pollInterval: 100,
-      events: {
-        onJobStart: (job) => {
-          console.log(`    → onJobStart: ${job.id}`);
-          started.push(job.id);
-        },
-        onJobComplete: (job) => {
-          console.log(`    → onJobComplete: ${job.id}`);
-          completed.push(job.id);
-          if (completed.length === 3) onAllDone();
-        },
+  const w = defineWorker(pq, "emails", async () => {
+    await new Promise((r) => setTimeout(r, 50));
+  }, {
+    concurrency: 2,
+    pollInterval: 100,
+    events: {
+      onJobStart: (job) => {
+        console.log(`    → onJobStart: ${job.id}`);
+        started.push(job.id);
+      },
+      onJobComplete: (job) => {
+        console.log(`    → onJobComplete: ${job.id}`);
+        completed.push(job.id);
+        if (completed.length === 3) onAllDone();
       },
     },
-  );
+  });
 
-  await worker.start();
+  const pool = new WorkerPool(pq, { workers: [w] });
+  await pool.start();
   await allDone;
-  await worker.shutdown();
+  await pool.shutdown();
 
   assert(
     started.length === 3,
@@ -172,46 +159,40 @@ async function test2_processWithEvents() {
     `onJobComplete fired 3 times (got ${completed.length})`,
   );
 
-  // Verify Redis state
-  const waitingAfter = await client.redis.client.lRange(
-    "{q:emails}:waiting",
-    0,
-    -1,
-  );
-  assert(
-    waitingAfter.length === 0,
-    `Waiting list is empty (got ${waitingAfter.length})`,
-  );
+  await withInspector(CONNECTION, async (r) => {
+    const waitingAfter = await r.lRange("{q:emails}:waiting", 0, -1);
+    assert(
+      waitingAfter.length === 0,
+      `Waiting list is empty (got ${waitingAfter.length})`,
+    );
 
-  const activeAfter = await client.redis.client.zCard("{q:emails}:active");
-  assert(
-    activeAfter === 0,
-    `Active set is empty (got ${activeAfter})`,
-  );
+    const activeAfter = await r.zCard("{q:emails}:active");
+    assert(
+      activeAfter === 0,
+      `Active set is empty (got ${activeAfter})`,
+    );
 
-  const completedSet = await client.redis.client.sMembers(
-    "{q:emails}:completed",
-  );
-  assert(
-    completedSet.length === 3,
-    `Completed set has 3 entries (got ${completedSet.length})`,
-  );
+    const completedSet = await r.zRange("{q:emails}:completed", 0, -1);
+    assert(
+      completedSet.length === 3,
+      `Completed ZSET has 3 entries (got ${completedSet.length})`,
+    );
 
-  // Verify job data shows completed status
-  for (const id of ids) {
-    const raw = await client.redis.client.hGet("{q:emails}:jobs", id);
-    if (raw) {
-      const job = JSON.parse(raw);
-      assert(
-        job.status === "completed",
-        `Job ${id} status is "completed" (got "${job.status}")`,
-      );
-      assert(
-        typeof job.finishedAt === "number",
-        `Job ${id} has finishedAt timestamp`,
-      );
+    for (const id of ids) {
+      const raw = await r.hGet("{q:emails}:jobs", id);
+      if (raw) {
+        const job = JSON.parse(raw);
+        assert(
+          job.status === "completed",
+          `Job ${id} status is "completed" (got "${job.status}")`,
+        );
+        assert(
+          typeof job.finishedAt === "number",
+          `Job ${id} has finishedAt timestamp`,
+        );
+      }
     }
-  }
+  });
 
   await client.disconnect();
 }
@@ -220,7 +201,7 @@ async function test2_processWithEvents() {
 // Test 3: Failed jobs with onJobFail + retry verification
 // ──────────────────────────────────────────────────────────
 async function test3_failedJobsAndRetries() {
-  console.log("\n🔬 Test 3: Failed jobs with onJobFail and retries");
+  console.log("\n🔬 Test 3: Failed jobs with onJobRetry + onJobFail");
   await flushRedis();
 
   const client = new QueueClient<TestQueues>({ connection: CONNECTION });
@@ -229,65 +210,76 @@ async function test3_failedJobsAndRetries() {
   });
   console.log(`  Enqueued failing job: ${jobId} (retries: 2)`);
 
+  // With retries: 2, a job that always throws produces 2 onJobRetry events
+  // (handler failures 1 and 2 fall back to waiting) followed by a single
+  // terminal onJobFail (handler failure 3 exhausts retries).
+  const retryEvents: { id: string; error: string }[] = [];
   const failEvents: { id: string; error: string }[] = [];
   let attempts = 0;
   const { promise: done, resolve: onDone } = Promise.withResolvers<void>();
 
-  const worker = new Worker<TestQueues, "failing">(
-    "failing",
-    async (job) => {
-      attempts++;
-      console.log(`    → Attempt ${attempts} for ${job.id}`);
-      if (attempts <= 3) {
-        throw new Error(`Attempt ${attempts} failed`);
-      }
-    },
-    {
-      connection: CONNECTION,
-      pollInterval: 100,
-      events: {
-        onJobFail: (job, error) => {
-          console.log(`    → onJobFail: ${job.id} — "${error}"`);
-          failEvents.push({ id: job.id, error });
-          // After 3 fail events (attempts exhausted), we're done
-          if (failEvents.length === 3) {
-            setTimeout(() => onDone(), 100);
-          }
-        },
-        onError: (ctx, err) => {
-          console.log(`    → onError[${ctx}]: ${err}`);
-        },
+  const w = defineWorker(pq, "failing", (job) => {
+    attempts++;
+    console.log(`    → Attempt ${attempts} for ${job.id}`);
+    throw new Error(`Attempt ${attempts} failed`);
+  }, {
+    pollInterval: 100,
+    events: {
+      onJobRetry: (job, error) => {
+        console.log(`    → onJobRetry: ${job.id} — "${error}"`);
+        retryEvents.push({ id: job.id, error });
+      },
+      onJobFail: (job, error) => {
+        console.log(`    → onJobFail: ${job.id} — "${error}"`);
+        failEvents.push({ id: job.id, error });
+        setTimeout(() => onDone(), 100);
+      },
+      onError: (ctx, err) => {
+        console.log(`    → onError[${ctx}]: ${err}`);
       },
     },
-  );
+  });
 
-  await worker.start();
+  const pool = new WorkerPool(pq, { workers: [w] });
+  await pool.start();
   await done;
-  await worker.shutdown();
+  await pool.shutdown();
 
   assert(attempts === 3, `Handler was called 3 times (got ${attempts})`);
   assert(
-    failEvents.length === 3,
-    `onJobFail fired 3 times (got ${failEvents.length})`,
+    retryEvents.length === 2,
+    `onJobRetry fired 2 times (got ${retryEvents.length})`,
+  );
+  assert(
+    failEvents.length === 1,
+    `onJobFail fired exactly once (got ${failEvents.length})`,
   );
 
-  // Verify final state in Redis — job should be in failed set after exhausting retries
-  const failedSet = await client.redis.client.sMembers("{q:failing}:failed");
-  assert(failedSet.includes(jobId), `Job ${jobId} is in failed set`);
+  await withInspector(CONNECTION, async (r) => {
+    const failedSet = await r.zRange("{q:failing}:failed", 0, -1);
+    assert(failedSet.includes(jobId), `Job ${jobId} is in failed ZSET`);
 
-  const raw = await client.redis.client.hGet("{q:failing}:jobs", jobId);
-  if (raw) {
-    const job = JSON.parse(raw);
-    assert(
-      job.status === "failed",
-      `Job status is "failed" (got "${job.status}")`,
-    );
-    assert(
-      job.failedReason === "Attempt 3 failed",
-      `failedReason recorded (got "${job.failedReason}")`,
-    );
-    assert(job.attempts === 3, `attempts count is 3 (got ${job.attempts})`);
-  }
+    const raw = await r.hGet("{q:failing}:jobs", jobId);
+    if (raw) {
+      const job = JSON.parse(raw);
+      assert(
+        job.status === "failed",
+        `Job status is "failed" (got "${job.status}")`,
+      );
+      assert(
+        job.failedReason === "Attempt 3 failed",
+        `failedReason recorded (got "${job.failedReason}")`,
+      );
+      assert(
+        job.failures === 3,
+        `failures count is 3 (got ${job.failures})`,
+      );
+      assert(
+        job.failureKind === "handler",
+        `failureKind is "handler" (got "${job.failureKind}")`,
+      );
+    }
+  });
 
   await client.disconnect();
 }
@@ -303,31 +295,26 @@ async function test4_shutdownTimeout() {
   await client.enqueue("slow", { delay: 5000 });
   console.log("  Enqueued slow job (5s delay)");
 
-  const { promise: jobStarted, resolve: onJobStarted } = Promise.withResolvers<
-    void
-  >();
+  const { promise: jobStarted, resolve: onJobStarted } = Promise
+    .withResolvers<void>();
 
-  const worker = new Worker<TestQueues, "slow">(
-    "slow",
-    async (job) => {
-      onJobStarted();
-      await new Promise((r) => setTimeout(r, job.data.delay));
+  const w = defineWorker(pq, "slow", async (job) => {
+    onJobStarted();
+    await new Promise((r) => setTimeout(r, job.data.delay));
+  }, {
+    pollInterval: 100,
+    events: {
+      onJobStart: (job) => console.log(`    → onJobStart: ${job.id}`),
+      onError: (ctx, err) => console.log(`    → onError[${ctx}]: ${err}`),
     },
-    {
-      connection: CONNECTION,
-      pollInterval: 100,
-      events: {
-        onJobStart: (job) => console.log(`    → onJobStart: ${job.id}`),
-        onError: (ctx, err) => console.log(`    → onError[${ctx}]: ${err}`),
-      },
-    },
-  );
+  });
 
-  await worker.start();
+  const pool = new WorkerPool(pq, { workers: [w] });
+  await pool.start();
   await jobStarted;
   console.log("  Job started processing, initiating force shutdown...");
 
-  const result: ShutdownResult = await worker.shutdown();
+  const result: ShutdownResult = await pool.shutdown();
   console.log(
     `  Shutdown result: mode=${result.mode}, unfinishedJobs=${result.unfinishedJobs}, requeued=${result.requeued}`,
   );
@@ -338,81 +325,56 @@ async function test4_shutdownTimeout() {
     `1 unfinished job (got ${result.unfinishedJobs})`,
   );
   assert(result.requeued === 1, `1 requeued job (got ${result.requeued})`);
-  assert(
-    worker.state === "stopped",
-    `State is "stopped" (got "${worker.state}")`,
-  );
 
   await client.disconnect();
 }
 
 // ──────────────────────────────────────────────────────────
-// Test 5: Restart after shutdown
+// Test 5: Sequential pools — pools are single-shot
 // ──────────────────────────────────────────────────────────
-async function test5_restart() {
-  console.log("\n🔬 Test 5: Worker restart after shutdown");
+async function test5_sequentialPools() {
+  console.log("\n🔬 Test 5: Pools are single-shot — fresh pool per run");
   await flushRedis();
 
   const client = new QueueClient<TestQueues>({ connection: CONNECTION });
-  const transitions: [WorkerState, WorkerState][] = [];
   const processed: string[] = [];
 
-  const worker = new Worker<TestQueues>(
-    "emails",
-    async (job) => {
+  const buildWorker = () =>
+    defineWorker(pq, "emails", async (job) => {
       processed.push(job.id);
-    },
-    {
-      connection: CONNECTION,
-      pollInterval: 100,
-      events: {
-        onStateChange: (from, to) => transitions.push([from, to]),
-      },
-    },
-  );
+    }, { pollInterval: 100 });
 
   // Run 1
   await client.enqueue("emails", { to: "run1@test.com", subject: "Run 1" });
-  await worker.start();
+  const pool1 = new WorkerPool(pq, { workers: [buildWorker()] });
+  await pool1.start();
   await new Promise((r) => setTimeout(r, 300));
-  await worker.shutdown();
-  console.log(
-    `  Run 1: processed ${processed.length} job(s), state=${worker.state}`,
-  );
+  await pool1.shutdown();
+  console.log(`  Run 1: processed ${processed.length} job(s)`);
   assert(
     processed.length === 1,
     `Run 1 processed 1 job (got ${processed.length})`,
   );
-  assert(worker.state === "stopped", `State is "stopped" after first run`);
 
-  // Run 2 — restart the same worker instance
+  // Reusing pool1 must reject
+  let restartRejected = false;
+  try {
+    await pool1.start();
+  } catch {
+    restartRejected = true;
+  }
+  assert(restartRejected, "pool1.start() after shutdown rejects");
+
+  // Run 2 — fresh pool
   await client.enqueue("emails", { to: "run2@test.com", subject: "Run 2" });
-  await worker.start();
+  const pool2 = new WorkerPool(pq, { workers: [buildWorker()] });
+  await pool2.start();
   await new Promise((r) => setTimeout(r, 300));
-  await worker.shutdown();
-  console.log(
-    `  Run 2: processed ${processed.length} total job(s), state=${worker.state}`,
-  );
+  await pool2.shutdown();
+  console.log(`  Run 2: processed ${processed.length} total job(s)`);
   assert(
     processed.length === 2,
     `Total processed is 2 (got ${processed.length})`,
-  );
-  assert(worker.state === "stopped", `State is "stopped" after second run`);
-
-  // Verify full transition sequence
-  const expected: [WorkerState, WorkerState][] = [
-    ["idle", "starting"],
-    ["starting", "running"],
-    ["running", "stopping"],
-    ["stopping", "stopped"],
-    ["stopped", "starting"],
-    ["starting", "running"],
-    ["running", "stopping"],
-    ["stopping", "stopped"],
-  ];
-  assert(
-    JSON.stringify(transitions) === JSON.stringify(expected),
-    `Full transition sequence matches (got ${transitions.length} transitions)`,
   );
 
   await client.disconnect();
@@ -433,29 +395,21 @@ async function test6_consoleDefaultFallback() {
   const processed: string[] = [];
   const { promise: done, resolve: onDone } = Promise.withResolvers<void>();
 
-  // No events — errors should go to console.error
-  const worker = new Worker<TestQueues>(
-    "emails",
-    async (job) => {
-      processed.push(job.id);
-      onDone();
-    },
-    {
-      connection: CONNECTION,
-      pollInterval: 100,
-    },
-  );
+  const w = defineWorker(pq, "emails", async (job) => {
+    processed.push(job.id);
+    onDone();
+  }, { pollInterval: 100 });
 
-  await worker.start();
+  const pool = new WorkerPool(pq, { workers: [w] });
+  await pool.start();
   await done;
   await new Promise((r) => setTimeout(r, 100));
-  await worker.shutdown();
+  await pool.shutdown();
 
   assert(
     processed.length === 1,
     `Processed 1 job without events configured (got ${processed.length})`,
   );
-  assert(worker.state === "stopped", "Worker stopped cleanly");
   console.log(
     "  (If there were errors, they would have appeared in console above)",
   );
@@ -472,7 +426,6 @@ async function test7_concurrency() {
 
   const client = new QueueClient<TestQueues>({ connection: CONNECTION });
 
-  // Enqueue 5 jobs
   for (let i = 0; i < 5; i++) {
     await client.enqueue("emails", {
       to: `user${i}@test.com`,
@@ -487,32 +440,28 @@ async function test7_concurrency() {
     void
   >();
 
-  const worker = new Worker<TestQueues>(
-    "emails",
-    async () => {
-      concurrent++;
-      maxConcurrent = Math.max(maxConcurrent, concurrent);
-      await new Promise((r) => setTimeout(r, 100));
-      concurrent--;
-      totalProcessed++;
-      if (totalProcessed === 5) onAllDone();
+  const w = defineWorker(pq, "emails", async () => {
+    concurrent++;
+    maxConcurrent = Math.max(maxConcurrent, concurrent);
+    await new Promise((r) => setTimeout(r, 100));
+    concurrent--;
+    totalProcessed++;
+    if (totalProcessed === 5) onAllDone();
+  }, {
+    concurrency: 3,
+    pollInterval: 100,
+    events: {
+      onJobStart: (job) =>
+        console.log(`    → start ${job.id} (concurrent: ${concurrent})`),
+      onJobComplete: (job) =>
+        console.log(`    → done  ${job.id} (concurrent: ${concurrent})`),
     },
-    {
-      connection: CONNECTION,
-      concurrency: 3,
-      pollInterval: 100,
-      events: {
-        onJobStart: (job) =>
-          console.log(`    → start ${job.id} (concurrent: ${concurrent})`),
-        onJobComplete: (job) =>
-          console.log(`    → done  ${job.id} (concurrent: ${concurrent})`),
-      },
-    },
-  );
+  });
 
-  await worker.start();
+  const pool = new WorkerPool(pq, { workers: [w] });
+  await pool.start();
   await allDone;
-  await worker.shutdown();
+  await pool.shutdown();
 
   console.log(
     `  Max concurrent: ${maxConcurrent}, Total processed: ${totalProcessed}`,
@@ -520,14 +469,53 @@ async function test7_concurrency() {
   assert(maxConcurrent <= 3, `Max concurrent ≤ 3 (got ${maxConcurrent})`);
   assert(totalProcessed === 5, `All 5 jobs processed (got ${totalProcessed})`);
 
-  // Verify all completed in Redis
-  const completedSet = await client.redis.client.sMembers(
-    "{q:emails}:completed",
+  const completedSet = await withInspector(
+    CONNECTION,
+    (r) => r.zRange("{q:emails}:completed", 0, -1),
   );
   assert(
     completedSet.length === 5,
-    `5 jobs in completed set (got ${completedSet.length})`,
+    `5 jobs in completed ZSET (got ${completedSet.length})`,
   );
+
+  await client.disconnect();
+}
+
+// ──────────────────────────────────────────────────────────
+// Test 8: Pool shares a single command + subscriber connection
+// across multiple registered queues
+// ──────────────────────────────────────────────────────────
+async function test8_sharedConnections() {
+  console.log("\n🔬 Test 8: Pool shares connections across queues");
+  await flushRedis();
+
+  const client = new QueueClient<TestQueues>({ connection: CONNECTION });
+  await client.enqueue("emails", { to: "a@b.com", subject: "Hello" });
+  await client.enqueue("slow", { delay: 10 });
+
+  const seen: string[] = [];
+  const { promise: bothDone, resolve: onBothDone } = Promise.withResolvers<
+    void
+  >();
+
+  const wEmails = defineWorker(pq, "emails", async (job) => {
+    seen.push(`emails:${job.data.subject}`);
+    if (seen.length === 2) onBothDone();
+  }, { pollInterval: 100 });
+
+  const wSlow = defineWorker(pq, "slow", async (job) => {
+    await new Promise((r) => setTimeout(r, job.data.delay));
+    seen.push(`slow:${job.data.delay}`);
+    if (seen.length === 2) onBothDone();
+  }, { pollInterval: 100 });
+
+  const pool = new WorkerPool(pq, { workers: [wEmails, wSlow] });
+  await pool.start();
+  await bothDone;
+  await pool.shutdown();
+
+  assert(seen.length === 2, `Both queues processed (got ${seen.length})`);
+  console.log(`  Processed: ${seen.join(", ")}`);
 
   await client.disconnect();
 }
@@ -543,9 +531,10 @@ await test1_stateTransitions();
 await test2_processWithEvents();
 await test3_failedJobsAndRetries();
 await test4_shutdownTimeout();
-await test5_restart();
+await test5_sequentialPools();
 await test6_consoleDefaultFallback();
 await test7_concurrency();
+await test8_sharedConnections();
 
 console.log("\n═══════════════════════════════════════════════");
 console.log(`  Results: ${passed} passed, ${failed} failed`);

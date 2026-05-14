@@ -1,14 +1,21 @@
-export { Worker } from "./src/worker.ts";
+export {
+  defineWorker,
+  isWorkerDefinition,
+  WORKER_DEFINITION_BRAND,
+} from "./src/define_worker.ts";
 export type {
   Processor,
-  ShutdownResult,
+  WorkerDefinition,
+  WorkerDefinitionOptions,
   WorkerEventHandlers,
-  WorkerOptions,
   WorkerState,
-} from "./src/worker.ts";
+} from "./src/define_worker.ts";
+
 export { WorkerPool } from "./src/worker_pool.ts";
 export type {
-  QueueProcessor,
+  ShutdownOptions,
+  ShutdownResult,
   WorkerPoolOptions,
 } from "./src/worker_pool.ts";
+
 export type { PanqueueConfig, QueueConfig } from "@panqueue/config";

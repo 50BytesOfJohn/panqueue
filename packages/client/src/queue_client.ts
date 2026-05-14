@@ -3,7 +3,6 @@ import type {
   ConnectionOptions,
   JobData,
   JobOptions,
-  JsonSerializable,
   QueueMap,
 } from "@panqueue/internal";
 import {
@@ -94,23 +93,18 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
   ): Promise<string> {
     assertJsonSerializable(data);
 
-    if (options?.backoff) {
-      throw new Error(
-        "[panqueue] Backoff is not yet supported and will be available when delayed retry " +
-        "scheduling is implemented. Remove the backoff option to enqueue.",
-      );
-    }
+    const jobId = generateJobId();
 
-    const jobId = options?.jobId ?? generateJobId();
-
-    const jobData: JobData<TQueues[K]> = {
+    const jobData: Omit<JobData<TQueues[K]>, "createdAt"> = {
       id: jobId,
       queueId,
       data,
       status: "waiting",
-      attempts: 0,
+      runs: 0,
+      failures: 0,
+      stalls: 0,
       maxRetries: options?.retries ?? 0,
-      createdAt: Date.now(),
+      maxStalls: options?.maxStalls ?? 5,
     };
 
     const serialized = JSON.stringify(jobData);

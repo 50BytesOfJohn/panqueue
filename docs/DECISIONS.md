@@ -17,9 +17,8 @@ for behavior; `SPEC.md` is authoritative.
 - Worker definitions are pure. `defineWorker(...)` captures the typed queue
   processor and worker-specific options but opens no connections and owns no
   lifecycle.
-- `WorkerPool.register(...)` accepts worker definitions and inline
-  `queueId`/processor registrations. The pool materializes those definitions
-  when started.
+- `WorkerPool.register(...)` accepts worker definitions. The pool materializes
+  those definitions when started.
 - Worker definitions do not carry Redis connection config. Pool-level connection
   config wins for all workers in the pool.
 
@@ -77,9 +76,44 @@ for behavior; `SPEC.md` is authoritative.
 - Cooperative cancellation (`AbortSignal` passed to processors) is deferred to
   v0.2 — it is breaking on the processor signature and not needed for the v0.1
   force-shutdown story.
-- A force-shutdown job whose `attempts` already equals `maxRetries + 1` goes
-  straight to `failed` rather than being requeued. This matches recovery
-  behavior and avoids resurrecting jobs that have already exhausted retries.
+- A force-shutdown handoff does not consume `failures` or `stalls` (see
+  2026-05-04 lifecycle separation). A restart loop can therefore requeue the
+  same job repeatedly; operators should watch high `runs` counts or repeated
+  `lastRequeueReason = "shutdown"` markers.
+
+## 2026-05-04: Three-Counter Job Lifecycle (v0.1)
+
+### Decision
+
+- A job carries three independent counters on its hash: `runs` (successful
+  durable claims), `failures` (handler throws), and `stalls` (lease-expiry
+  recoveries). The previous single `attempts` field is removed.
+- `maxRetries` gates `failures`; `maxStalls` gates `stalls`. `maxStalls`
+  defaults to `5` and is configurable per job through `EnqueueOptions`.
+- `claim_global` is the only script that increments `runs`. `fail` is the only
+  script that increments `failures`. `recover` is the only script that
+  increments `stalls`. `requeue_active` (force-shutdown handoff) touches none of
+  the three.
+- Every durable lifecycle timestamp (`createdAt`, `lastStartedAt`,
+  `leaseDeadline`, `lastFailedAt`, `lastStalledAt`, `lastRequeuedAt`,
+  `finishedAt`) is written from Redis `TIME` inside Lua so the clock is
+  authoritative for one primary.
+- `failureKind` (`"handler" | "stalled"`) and `failedReason` are set on every
+  failure transition so operators can read the most recent failure regardless of
+  whether the job is currently `waiting` or terminal.
+
+### Why
+
+- A single `attempts` counter conflated three distinct events with different
+  operational meanings: user code throwing, the runtime losing ownership of a
+  lease, and a deliberate shutdown handoff. Each has its own retry budget and
+  its own remediation story; collapsing them under one counter erased that
+  signal.
+- Separating `runs` from `failures` also lets observability code answer "how
+  many times has this job actually executed" independently of "how many times it
+  has failed," which matters for at-least-once auditing.
+- Redis-side timestamps avoid clock skew between the producer and consumer hosts
+  and remove the need for the client to send a `now` parameter on every enqueue.
 
 ## 2026-04-30: Job Leases & Stalled-Job Recovery (v0.1)
 
@@ -87,7 +121,7 @@ for behavior; `SPEC.md` is authoritative.
 
 - The `active` collection is a Redis `ZSET` scored by lease deadline (ms), not a
   `SET`. Each claim writes the deadline as the score and a fresh
-  server-generated `lockToken` (sha1 of jobId + now + attempts) on the job hash.
+  server-generated `lockToken` (sha1 of jobId + now + runs) on the job hash.
 - `complete`, `fail`, and `extend_lock` Lua scripts fence on `lockToken`: they
   no-op if the caller's token does not match the hash. A stale ack surfaces to
   the worker via the `onJobStale` event.
@@ -96,11 +130,9 @@ for behavior; `SPEC.md` is authoritative.
   lost), the renewer stops and emits a `lease-lost:<jobId>` error.
 - A periodic `recover` sweep on each worker (default 30s, batch 100) is a single
   atomic Lua script: `ZRANGEBYSCORE 0 now`, then per candidate `ZSCORE`+`ZREM`
-  (re-fence under script atomicity), requeue or move to `failed` based on
-  remaining retries. Concurrent sweeps are safe — only the first `ZREM` wins.
-- Recovery treats the crashed claim as a consumed attempt and does not
-  re-increment `attempts`. A job that stalls on its last allowed attempt goes
-  directly to `failed`.
+  (re-fence under script atomicity), increment `stalls`, then either requeue (if
+  `stalls <= maxStalls`) or move to `failed`. Concurrent sweeps are safe — only
+  the first `ZREM` wins.
 
 ### Why
 
@@ -108,11 +140,9 @@ for behavior; `SPEC.md` is authoritative.
   expired?" into one structure, which makes the sweep an index-backed
   `ZRANGEBYSCORE` instead of an O(N) scan of per-job lock keys plus the active
   set.
-- A dedicated `lockToken` keeps fencing semantics independent of `attempts`.
-  Reusing `attempts` would have worked but coupled retry accounting to lease
-  identity — any future change (separating execution attempts from stall
-  recoveries, manual-retry APIs) would silently break the fence. The few extra
-  bytes per job hash are worth the clarity.
+- A dedicated `lockToken` keeps fencing semantics independent of the retry
+  counters: any future change to retry accounting cannot silently break the
+  fence. The few extra bytes per job hash are worth the clarity.
 - `ZSCORE`+`ZREM` inside the same Lua script is the only way to safely fence
   against a renewer pushing the deadline forward at exactly the same instant a
   sweeper fires.

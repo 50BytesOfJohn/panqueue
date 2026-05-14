@@ -1,7 +1,13 @@
 import type { JobData, JsonSerializable } from "@panqueue/internal";
-import { activeKey, jobsKey, waitingKey } from "@panqueue/internal";
-import type { RedisClient } from "../redis_connection.ts";
-import { BaseJobScheduler } from "./base.ts";
+import {
+  activeKey,
+  corruptDataKey,
+  corruptKey,
+  jobsKey,
+  waitingKey,
+} from "@panqueue/internal";
+import type { PanqueueWorkerClient } from "../redis_connection.ts";
+import { BaseJobScheduler, type ClaimResult } from "./base.ts";
 
 /**
  * Global mode scheduler — claims jobs via RPOP from the waiting list.
@@ -12,21 +18,58 @@ import { BaseJobScheduler } from "./base.ts";
 export class GlobalJobScheduler<
   T extends JsonSerializable = JsonSerializable,
 > extends BaseJobScheduler<T> {
-  constructor(queueId: string, client: RedisClient) {
+  constructor(queueId: string, client: PanqueueWorkerClient) {
     super(queueId, client);
   }
 
   /** Claim the next job from the waiting list using an atomic Lua script. */
-  async claim(leaseMs: number): Promise<JobData<T> | null> {
+  async claim(leaseMs: number): Promise<ClaimResult<T>> {
     const result = await this.client.claimGlobal(
       waitingKey(this.queueId),
       activeKey(this.queueId),
       jobsKey(this.queueId),
-      String(Date.now()),
+      corruptKey(this.queueId),
+      corruptDataKey(this.queueId),
       String(leaseMs),
     );
 
     if (!result) return null;
-    return JSON.parse(result as string) as JobData<T>;
+    if (typeof result !== "string") {
+      throw new Error(`Unexpected claim result: ${String(result)}`);
+    }
+    if (result.startsWith("corrupt:")) {
+      return {
+        status: "corrupt",
+        jobId: result.slice("corrupt:".length),
+        reason: "invalid-json",
+      };
+    }
+    const parsed: unknown = JSON.parse(result);
+    return assertJobData<T>(parsed);
   }
+}
+
+function assertJobData<T extends JsonSerializable>(value: unknown): JobData<T> {
+  if (!isClaimedJobData<T>(value)) {
+    throw new Error("Claimed job payload is missing required active fields");
+  }
+
+  return value;
+}
+
+function isClaimedJobData<T extends JsonSerializable>(
+  value: unknown,
+): value is JobData<T> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    typeof value.id === "string" &&
+    "queueId" in value &&
+    typeof value.queueId === "string" &&
+    "status" in value &&
+    value.status === "active" &&
+    "lockToken" in value &&
+    typeof value.lockToken === "string"
+  );
 }

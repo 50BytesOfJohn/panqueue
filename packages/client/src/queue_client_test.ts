@@ -1,33 +1,31 @@
 import { expect } from "jsr:@std/expect";
 import { assertSpyCalls, type Spy, spy, stub } from "jsr:@std/testing/mock";
-import {
-  type RedisClient,
-  RedisConnection,
-  _internals,
-} from "./redis_connection.ts";
+import { _internals, type PanqueueProducerClient } from "./redis_connection.ts";
 import { QueueClient } from "./queue_client.ts";
 
 type TestQueues = {
   emails: { to: string; subject: string };
 };
 
+type FakeClient = PanqueueProducerClient & {
+  connect: Spy;
+  disconnect: Spy;
+  on: Spy;
+  enqueue: Spy;
+};
+
 /** Creates a fake Redis client with spied methods including enqueue. */
-function createFakeClient() {
+function createFakeClient(): FakeClient {
   return {
     connect: spy(() => Promise.resolve()),
     disconnect: spy(() => Promise.resolve()),
     on: spy(),
     enqueue: spy(() => Promise.resolve("fake-id")),
-  } as unknown as RedisClient & {
-    connect: Spy;
-    disconnect: Spy;
-    on: Spy;
-    enqueue: Spy;
-  };
+  } as unknown as FakeClient;
 }
 
 /** Stubs createClient to return the given fake. */
-function stubCreateClient(fakeClient: RedisClient) {
+function stubCreateClient(fakeClient: FakeClient) {
   return stub(
     _internals,
     "createClient",
@@ -65,7 +63,9 @@ Deno.test("enqueue stores job data and pushes to waiting list via Lua", async ()
     expect(jobData.data).toEqual({ to: "a@b.com", subject: "Hi" });
     expect(jobData.queueId).toBe("emails");
     expect(jobData.status).toBe("waiting");
-    expect(jobData.attempts).toBe(0);
+    expect(jobData.runs).toBe(0);
+    expect(jobData.failures).toBe(0);
+    expect(jobData.stalls).toBe(0);
   } finally {
     createStub.restore();
   }
@@ -100,23 +100,20 @@ Deno.test("enqueue returns a job ID", async () => {
   }
 });
 
-Deno.test("enqueue with custom jobId uses it", async () => {
+Deno.test("enqueue stores the generated job ID in the job data", async () => {
   const { fakeClient, createStub, client } = await setup();
   try {
-    const jobId = await client.enqueue(
-      "emails",
-      { to: "a@b.com", subject: "Hi" },
-      { jobId: "my-custom-id" },
-    );
-
-    expect(jobId).toBe("my-custom-id");
+    const jobId = await client.enqueue("emails", {
+      to: "a@b.com",
+      subject: "Hi",
+    });
 
     // enqueue(jobsKey, waitingKey, notifyKey, jobId, serialized)
     const call = (fakeClient.enqueue as unknown as Spy).calls[0];
-    expect(call.args[3]).toBe("my-custom-id");
+    expect(call.args[3]).toBe(jobId);
 
     const jobData = JSON.parse(call.args[4]);
-    expect(jobData.id).toBe("my-custom-id");
+    expect(jobData.id).toBe(jobId);
   } finally {
     createStub.restore();
   }
@@ -129,22 +126,6 @@ Deno.test("enqueue rejects non-JSON-serializable payloads", async () => {
       // deno-lint-ignore no-explicit-any
       client.enqueue("emails", { to: "a@b.com", subject: () => {} } as any),
     ).rejects.toThrow(TypeError);
-  } finally {
-    createStub.restore();
-  }
-});
-
-Deno.test("enqueue rejects backoff option as unsupported", async () => {
-  const { createStub, client } = await setup();
-  try {
-    await expect(
-      client.enqueue(
-        "emails",
-        { to: "a@b.com", subject: "Hi" },
-        // deno-lint-ignore no-explicit-any
-        { backoff: { type: "exponential", delay: 1000 } } as any,
-      ),
-    ).rejects.toThrow("[panqueue] Backoff is not yet supported");
   } finally {
     createStub.restore();
   }
@@ -163,6 +144,23 @@ Deno.test("enqueue sets maxRetries from options", async () => {
     const call = (fakeClient.enqueue as unknown as Spy).calls[0];
     const jobData = JSON.parse(call.args[4]);
     expect(jobData.maxRetries).toBe(3);
+  } finally {
+    createStub.restore();
+  }
+});
+
+Deno.test("enqueue sets maxStalls from options", async () => {
+  const { fakeClient, createStub, client } = await setup();
+  try {
+    await client.enqueue(
+      "emails",
+      { to: "a@b.com", subject: "Hi" },
+      { maxStalls: 2 },
+    );
+
+    const call = (fakeClient.enqueue as unknown as Spy).calls[0];
+    const jobData = JSON.parse(call.args[4]);
+    expect(jobData.maxStalls).toBe(2);
   } finally {
     createStub.restore();
   }

@@ -20,14 +20,24 @@ export function activeKey(queueId: string): string {
   return queueKey(queueId, "active");
 }
 
-/** Completed jobs set. */
+/** Completed jobs sorted set, scored by finishedAt. */
 export function completedKey(queueId: string): string {
   return queueKey(queueId, "completed");
 }
 
-/** Failed jobs set. */
+/** Failed jobs sorted set, scored by finishedAt. */
 export function failedKey(queueId: string): string {
   return queueKey(queueId, "failed");
+}
+
+/** Corrupt job index sorted set, scored by detection time. */
+export function corruptKey(queueId: string): string {
+  return queueKey(queueId, "corrupt");
+}
+
+/** Corrupt job forensic payload hash, keyed by job ID. */
+export function corruptDataKey(queueId: string): string {
+  return queueKey(queueId, "corrupt:data");
 }
 
 /** Delayed jobs sorted set — scored by scheduled timestamp. */

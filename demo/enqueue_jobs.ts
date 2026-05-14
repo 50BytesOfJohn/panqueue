@@ -1,13 +1,14 @@
 import { QueueClient } from "@panqueue/client";
+import { withInspector } from "./_inspect.ts";
 
 type DemoQueues = {
   emails: { to: string; subject: string; body: string };
   thumbnails: { url: string; width: number };
 };
 
-const client = new QueueClient<DemoQueues>({
-  connection: { host: "localhost", port: 6399 },
-});
+const CONNECTION = { host: "localhost", port: 6399 };
+
+const client = new QueueClient<DemoQueues>({ connection: CONNECTION });
 
 const job1 = await client.enqueue("emails", {
   to: "alice@example.com",
@@ -31,21 +32,19 @@ console.log(`Enqueued thumbnail job: ${job3}`);
 
 console.log("\nAll 3 jobs enqueued. Verifying in Redis...\n");
 
-// Read back the jobs from Redis to verify
-const redis = client.redis.client;
+await withInspector(CONNECTION, async (redis) => {
+  const emailJobs = await redis.lRange("{q:emails}:waiting", 0, -1);
+  console.log(`emails:waiting → [${emailJobs.join(", ")}]`);
 
-const emailJobs = await redis.lRange("{q:emails}:waiting", 0, -1);
-console.log(`emails:waiting → [${emailJobs.join(", ")}]`);
+  const thumbJobs = await redis.lRange("{q:thumbnails}:waiting", 0, -1);
+  console.log(`thumbnails:waiting → [${thumbJobs.join(", ")}]`);
 
-const thumbJobs = await redis.lRange("{q:thumbnails}:waiting", 0, -1);
-console.log(`thumbnails:waiting → [${thumbJobs.join(", ")}]`);
-
-// Show one job's full data
-const jobData = await redis.hGet("{q:emails}:jobs", job1);
-if (jobData) {
-  console.log(`\nSample job data for ${job1}:`);
-  console.log(JSON.parse(jobData));
-}
+  const jobData = await redis.hGet("{q:emails}:jobs", job1);
+  if (jobData) {
+    console.log(`\nSample job data for ${job1}:`);
+    console.log(JSON.parse(jobData));
+  }
+});
 
 await client.disconnect();
 console.log("\nDone!");

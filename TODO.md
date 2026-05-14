@@ -21,16 +21,16 @@ Focused v0.1 TODO list from the current review and product decisions.
     safe and avoids the deployment-hang footgun on long jobs. Cooperative
     cancellation (AbortSignal in processors) is deferred.
 
-- [ ] Fix enqueue identity semantics.
+- [x] Fix enqueue identity semantics.
   - v0.1 job IDs are generated and owned by panqueue.
   - Remove or reject user-provided `jobId`.
   - Make enqueue atomically reject ID collisions instead of overwriting existing
     job data.
 
-- [ ] Reject unsupported delayed jobs.
+- [x] Reject unsupported delayed jobs.
   - `delay` is not part of v0.1.
-  - Remove it from the v0.1 public type or throw clearly when it is provided.
-  - Keep retry backoff rejected until delayed retry scheduling exists.
+  - Removed from `JobOptions` along with `backoff` so the public type does not
+    advertise scheduling features the runtime cannot honour.
 
 - [ ] Make missing job data handling non-lossy.
   - The claim script must not permanently drop a waiting-list entry when its job
@@ -40,27 +40,21 @@ Focused v0.1 TODO list from the current review and product decisions.
 
 ## v0.1 API Alignment
 
-- [ ] Align `QueueClient` with the single producer API.
-  - Keep `client.enqueue(queueId, payload, options?)` as the only producer
-    operation.
-  - Support both shared `PanqueueConfig` and standalone custom connection
-    config.
-  - Panqueue owns the underlying Redis client instance. Users pass connection
+- [x] Align `QueueClient` with the single producer API.
+  - `client.enqueue(queueId, payload, options?)` is the only producer operation.
+    Supports both shared `PanqueueConfig` and standalone custom connection
+    config. Panqueue owns the underlying Redis client; users pass connection
     config, not a Redis client object.
 
-- [ ] Implement `defineWorker` for pure worker definitions.
+- [x] Implement `defineWorker` for pure worker definitions.
   - `defineWorker(config, queueId, processor, options?)` captures a typed
-    processor and worker-only options.
-  - Worker definitions open no Redis connections and own no lifecycle.
-  - Worker definitions do not accept Redis connection overrides.
+    processor and worker-only options. Definitions open no Redis connections and
+    own no lifecycle.
 
-- [ ] Implement `WorkerPool` as the consumer lifecycle boundary.
-  - `register(workerDefinition)` registers a worker definition.
-  - `register(workerDefinitions)` registers an array of worker definitions.
-  - `register(queueId, processor, options?)` remains available as compact
-    single-file shorthand.
-  - `WorkerPool` creates and reuses the worker-side Redis instances for all
-    registered worker definitions based on its connection config.
+- [x] Implement `WorkerPool` as the consumer lifecycle boundary.
+  - The pool accepts an array of worker definitions at construction time.
+  - The pool creates and reuses the worker-side Redis instances (one command
+    client and one subscriber) for every registered queue.
 
 ## Release Quality
 
