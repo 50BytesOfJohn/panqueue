@@ -1,4 +1,8 @@
-# Panqueue
+<p align="center">
+  <img src="assets/logo.png" alt="Panqueue pancake mascot logo" width="180">
+</p>
+
+<h1 align="center">Panqueue</h1>
 
 A Redis-backed queue library for Deno.
 
