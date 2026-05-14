@@ -9,8 +9,8 @@ type DemoQueues = {
 const pq = definePanqueueConfig<DemoQueues>({
   redis: { host: "localhost", port: 6399 },
   queues: {
-    emails: { mode: "global" },
-    thumbnails: { mode: "global" },
+    emails: {},
+    thumbnails: {},
   },
 });
 

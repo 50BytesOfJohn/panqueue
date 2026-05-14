@@ -59,8 +59,8 @@ type QueueMap = {
 export const pq = definePanqueueConfig<QueueMap>({
   redis: { url: Deno.env.get("REDIS_URL")! },
   queues: {
-    email: { mode: "global" },
-    image: { mode: "global" },
+    email: {},
+    image: {},
   },
 });
 ```
@@ -99,7 +99,7 @@ from them and the explicit generic parameter becomes unnecessary:
 export const pq = definePanqueueConfig({
   redis: { url: Deno.env.get("REDIS_URL")! },
   queues: {
-    email: { mode: "global", schema: emailSchema },
+    email: { schema: emailSchema },
   },
 });
 ```
@@ -110,7 +110,7 @@ replaces the generic.
 ### Config Scope
 
 The shared config holds everything both sides must agree on: Redis connection,
-queue IDs, and queue mode.
+queue IDs, and concurrency configuration.
 
 Settings that are inherently one-sided stay with their respective constructors:
 
@@ -381,7 +381,7 @@ enqueue with the same dedup key is rejected.
 
 ```ts
 queues: {
-  email: { mode: "global", dedup: { window: "1h", onDuplicate: "ignore" } },
+  email: { dedup: { window: "1h", onDuplicate: "ignore" } },
 }
 ```
 
@@ -396,7 +396,7 @@ job.
 
 - Priorities
 - Dead letter queues
-- Rate limiting (composable constraint, orthogonal to queue mode — see
+- Rate limiting (composable constraint, orthogonal to concurrency scope — see
   Decisions)
 - Event streaming (Redis Streams)
 - Job flows/dependencies
@@ -580,10 +580,10 @@ executions and is bounded by the configured concurrency.
 
 These are explicit tradeoffs in favor of correctness and simplicity.
 
-## Planned Keyed Concurrency Mode (Future Spec)
+## Planned Keyed Concurrency (Future Spec)
 
-This section defines the Redis layout and scheduling logic for keyed concurrency
-mode (`keyed`). It is a planned mode, not part of the v0.1 core lifecycle.
+This section defines the Redis layout and scheduling logic for
+`scope: "keyed"`. It is a planned scope, not part of the v0.1 core lifecycle.
 
 ### Overview
 
@@ -591,73 +591,73 @@ Keyed concurrency limits concurrently processed jobs per concurrency key (for
 example `userId`, `tenantId`, or `projectId`) in addition to global worker
 concurrency.
 
-This mode uses a different Redis structure than `global` mode and must be
-explicitly enabled per queue. Workers and clients must operate using the same
-mode for a queue.
+`scope: "keyed"` uses a different Redis structure than `scope: "global"` and
+must be explicitly set per queue. Workers and clients must use the same
+concurrency scope for a given queue.
 
-### Concurrency Modes
+### Concurrency Scopes
 
-#### `global`
+#### `scope: "global"` (default)
 
 Only global worker concurrency is enforced. All jobs share the same execution
 pool. No per-key concurrency control.
 
 > At most **N jobs total** can run concurrently across the queue.
 
-#### `keyed`
+#### `scope: "keyed"`
 
-Concurrency is limited per concurrency key. Each job includes a key and each key
-can run up to a fixed number of concurrent jobs.
+Concurrency is limited per concurrency key. Each job includes a key and each
+key can run up to a fixed number of concurrent jobs.
 
 > At most **M jobs per key** can run concurrently.
 
-#### `dynamic` (future)
+#### `scope: "dynamic"` (future)
 
 Extends keyed concurrency by allowing limits to vary per key (with a queue-level
 default).
 
 > Concurrency per key is determined dynamically.
 
-Each queue has a single mode that determines its Redis data layout and
-scheduling logic.
+Each queue has a single concurrency scope that determines its Redis data layout
+and scheduling logic.
 
-### Mode Metadata
+### Scope Metadata
 
-Queue mode and keyed concurrency configuration are stored in:
+Queue scope and keyed concurrency configuration are stored in:
 
     {q:<queueId>}:meta
 
 Fields:
 
-    mode = global | keyed
+    scope = global | keyed
     keyConcurrency = <integer>
     seq = <integer>
 
-- `mode` defines the authoritative queue concurrency mode.
+- `scope` defines the authoritative queue concurrency scope.
 - `keyConcurrency` is the default maximum number of concurrently active jobs per
   key.
 - `seq` is a monotonically increasing counter used to order the ready-key set;
   it is incremented on claims (for fairness rotation).
 
-### Mode Validation
+### Scope Validation
 
 #### Worker
 
 - Read queue metadata on startup
-- Validate configured mode matches stored mode
+- Validate configured scope matches stored scope
 - Refuse to start on mismatch
 
 #### Queue Client
 
-- Resolve queue mode from metadata unless explicitly configured
-- Cache the resolved mode per client instance per queue
+- Resolve queue scope from metadata unless explicitly configured (`scope: "auto"`)
+- Cache the resolved scope per client instance per queue
 - Route enqueues into the correct Redis layout
-- Fail enqueue if configured mode and stored mode differ
+- Fail enqueue if configured scope and stored scope differ
 
 ### Keyed Scheduling Rules
 
-Keyed mode enforces a maximum number of concurrently active jobs per concurrency
-key.
+`scope: "keyed"` enforces a maximum number of concurrently active jobs per
+concurrency key.
 
 - Every job must include a concurrency key
 - Global worker concurrency limits still apply
@@ -785,13 +785,13 @@ workers do not process.
 
 ### Performance Characteristics
 
-Compared with `global` mode:
+Compared with `scope: "global"`:
 
 - Enqueue remains constant time
 - Claiming requires sorted-set work proportional to the number of active keys
 - Memory usage scales with the number of active keys (plus queued jobs)
 
-Queues that do not require per-key fairness/isolation should use `global` mode
+Queues that do not require per-key fairness/isolation should use `scope: "global"`
 to minimize Redis overhead.
 
 ## Decision Log

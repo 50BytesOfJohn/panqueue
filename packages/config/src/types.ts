@@ -2,8 +2,11 @@ import type { ConnectionOptions, QueueMap } from "@panqueue/internal";
 
 /** Per-queue configuration within the shared config. */
 export interface QueueConfig {
-  /** Concurrency mode for this queue. */
-  mode: "global";
+  /** Concurrency settings for this queue. Defaults to global scope. */
+  concurrency?: {
+    /** Queue-wide concurrency scope. */
+    scope: "global";
+  };
 }
 
 /** Configuration object returned by `definePanqueueConfig`. */

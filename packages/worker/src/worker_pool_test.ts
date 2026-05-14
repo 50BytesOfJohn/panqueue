@@ -14,8 +14,8 @@ type TestQueues = {
 const pq = definePanqueueConfig<TestQueues>({
   redis: "redis://localhost:6379",
   queues: {
-    emails: { mode: "global" },
-    thumbnails: { mode: "global" },
+    emails: {},
+    thumbnails: {},
   },
 });
 

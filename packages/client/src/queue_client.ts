@@ -19,8 +19,11 @@ export type EnqueueOptions = JobOptions;
 
 /** Per-queue configuration for the client-only config. */
 export interface ClientQueueConfig {
-  /** Concurrency mode for this queue. Defaults to `"auto"`. */
-  mode?: "global" | "auto";
+  /** Concurrency settings for this queue. Defaults to automatic scope detection. */
+  concurrency?: {
+    /** Queue concurrency scope. */
+    scope?: "global" | "auto";
+  };
 }
 
 /** Client-specific configuration (for codebases that don't share a PanqueueConfig). */
@@ -153,13 +156,13 @@ export function createQueueClient<TQueues extends QueueMap>(
  * Create a type-safe QueueClient from a client-specific config.
  *
  * Use this overload in distributed systems where the client has its own
- * configuration separate from the worker. Mode defaults to `"auto"` per queue.
+ * configuration separate from the worker. Scope defaults to `"auto"` per queue.
  *
  * @example
  * ```ts
  * const client = createQueueClient<MyQueues>({
  *   redis: "redis://localhost:6379",
- *   queues: { emails: {}, thumbnails: { mode: "global" } },
+ *   queues: { emails: {}, thumbnails: { concurrency: { scope: "global" } } },
  * });
  * ```
  */

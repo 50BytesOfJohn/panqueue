@@ -26,9 +26,9 @@ type TestQueues = {
 const pq = definePanqueueConfig<TestQueues>({
   redis: CONNECTION,
   queues: {
-    emails: { mode: "global" },
-    slow: { mode: "global" },
-    failing: { mode: "global" },
+    emails: {},
+    slow: {},
+    failing: {},
   },
 });
 

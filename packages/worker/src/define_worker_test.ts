@@ -14,8 +14,8 @@ type Queues = {
 const pq = definePanqueueConfig<Queues>({
   redis: { host: "localhost", port: 6379 },
   queues: {
-    emails: { mode: "global" },
-    thumbnails: { mode: "global" },
+    emails: {},
+    thumbnails: {},
   },
 });
 

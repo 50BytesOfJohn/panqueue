@@ -50,7 +50,7 @@ export function jobsKey(queueId: string): string {
   return queueKey(queueId, "jobs");
 }
 
-/** Queue metadata hash (mode, concurrency settings, etc.). */
+/** Queue metadata hash (scope, concurrency settings, etc.). */
 export function metaKey(queueId: string): string {
   return queueKey(queueId, "meta");
 }

@@ -3,6 +3,36 @@
 This file records rationale and dated decisions. It is not the source of truth
 for behavior; `SPEC.md` is authoritative.
 
+## 2026-05-14: Concurrency Scope Naming
+
+### Decision
+
+- The per-queue concurrency configuration is expressed as
+  `concurrency: { scope: "global" | "keyed" }` nested inside the queue config.
+- `concurrency` is optional. Omitting it defaults to `scope: "global"`.
+- The previous `mode: "global"` flat field on `QueueConfig` is removed.
+- Redis metadata stores the scope under the key `scope` (replacing `mode`).
+- A future `scope: "auto"` value will allow the client to resolve the scope from
+  Redis metadata written by the worker, enabling zero-config cross-language setups
+  where the worker is the source of truth.
+
+### Why
+
+- `mode: "global"` as a required flat field was poor DX: the word "mode" gives
+  no hint of what varies between options, and requiring it for the only available
+  value added boilerplate with no benefit.
+- `scope` directly answers the question "what is the scope of this concurrency
+  limit?" — `"global"` means the whole queue, `"keyed"` means per key. The
+  contrast is self-explanatory.
+- Nesting under `concurrency` groups the concept correctly and makes room for
+  related fields (`key`, `limit`) without polluting the top-level queue config.
+- Making `concurrency` optional with `"global"` as the default eliminates
+  required boilerplate for the common case.
+- `scope: "auto"` (future) supports cross-language deployments where client and
+  worker are in different codebases: the client reads the scope from Redis rather
+  than requiring it to be duplicated in config. Explicit scope values remain
+  useful for fail-fast mismatch detection at startup.
+
 ## 2026-05-03: Panqueue-Owned Redis Instances & Pure Worker Definitions
 
 ### Decision
@@ -354,7 +384,7 @@ pool-level connection config is the v0.1 execution boundary._
 ### Config Scope
 
 The shared config holds what both sides must agree on: Redis connection, queue
-IDs, modes, keyed concurrency settings.
+IDs, and concurrency configuration.
 
 One-sided settings stay with their respective `create*` calls:
 
@@ -464,19 +494,19 @@ scope TBD.
 
 ### Decision
 
-Rate limiting is a separate, composable config field — not a queue mode. It can
-be combined with any mode (`global`, `keyed`, future `dynamic`).
+Rate limiting is a separate, composable config field — not a concurrency scope.
+It can be combined with any scope (`global`, `keyed`, future `dynamic`).
 
 ### Why
 
-- Modes define scheduling topology (how jobs are organized and claimed). Rate
-  limiting is an orthogonal constraint on throughput.
-- Making rate limiting a mode would cause combinatorial explosion: `global`,
+- Concurrency scopes define scheduling topology (how jobs are organized and
+  claimed). Rate limiting is an orthogonal constraint on throughput.
+- Making rate limiting a scope would cause combinatorial explosion: `global`,
   `keyed`, `global-rate-limited`, `keyed-rate-limited`, etc.
 - As a composable field, the claim Lua script adds one additional check after
-  the mode-specific logic, keeping both concerns clean
-- In keyed mode, rate limits naturally scope per key (the scheduling unit). In
-  global mode, they scope per queue.
+  the scope-specific logic, keeping both concerns clean.
+- In keyed scope, rate limits naturally scope per key (the scheduling unit). In
+  global scope, they scope per queue.
 
 ## 2026-02-20: Documentation Policy
 

@@ -20,9 +20,9 @@ type LoadQueues = {
 const pq = definePanqueueConfig<LoadQueues>({
   redis: CONNECTION,
   queues: {
-    fast: { mode: "global" },
-    mixed: { mode: "global" },
-    heavy: { mode: "global" },
+    fast: {},
+    mixed: {},
+    heavy: {},
   },
 });
 
