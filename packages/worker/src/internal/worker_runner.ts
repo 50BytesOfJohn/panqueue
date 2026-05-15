@@ -9,6 +9,8 @@ import type { PanqueueWorkerClient } from "../redis_connection.ts";
 import { GlobalJobScheduler } from "../scheduler/global.ts";
 import type { BaseJobScheduler } from "../scheduler/base.ts";
 import { Semaphore } from "../semaphore.ts";
+import { LeaseRenewer, type LeaseRenewal } from "./lease_renewer.ts";
+import { StalledRecoverySweep } from "./stalled_recovery_sweep.ts";
 
 interface InFlightEntry {
   promise: Promise<void>;
@@ -46,13 +48,14 @@ export class WorkerRunner {
 
   readonly #scheduler: BaseJobScheduler;
   readonly #semaphore: Semaphore;
+  readonly #leaseRenewer: LeaseRenewer;
+  readonly #recoverySweep: StalledRecoverySweep;
   readonly #stopController = new AbortController();
   readonly #inFlight = new Set<InFlightEntry>();
 
   #state: WorkerState = "idle";
   #claimLoopPromise: Promise<void> | null = null;
   #wakeResolve: (() => void) | null = null;
-  #recoverTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     queueId: string,
@@ -73,6 +76,22 @@ export class WorkerRunner {
 
     this.#scheduler = new GlobalJobScheduler(queueId, client);
     this.#semaphore = new Semaphore(this.#concurrency);
+    this.#leaseRenewer = new LeaseRenewer({
+      scheduler: this.#scheduler,
+      leaseMs: this.#leaseMs,
+      lockRenewMs: this.#lockRenewMs,
+      onError: (context, error) => this.#emitError(context, error),
+      onJobCorrupt: (jobId, reason) => this.#emitJobCorrupt(jobId, reason),
+    });
+    this.#recoverySweep = new StalledRecoverySweep({
+      scheduler: this.#scheduler,
+      intervalMs: this.#recoverIntervalMs,
+      batchSize: this.#recoverBatchSize,
+      isActive: () => this.#state === "running",
+      onJobRecovered: (jobIds) => this.#emitJobRecovered(jobIds),
+      onError: (context, error) => this.#emitError(context, error),
+      onJobCorrupt: (jobId, reason) => this.#emitJobCorrupt(jobId, reason),
+    });
   }
 
   /** Current lifecycle state. */
@@ -94,7 +113,7 @@ export class WorkerRunner {
     }
     this.#transition("running");
     this.#claimLoopPromise = this.#claimLoop();
-    this.#startRecoveryTimer();
+    this.#recoverySweep.start();
   }
 
   /** Wake the claim loop. */
@@ -114,10 +133,7 @@ export class WorkerRunner {
     if (this.#state !== "running") return;
     this.#transition("stopping");
     this.#stopController.abort();
-    if (this.#recoverTimer) {
-      clearInterval(this.#recoverTimer);
-      this.#recoverTimer = null;
-    }
+    this.#recoverySweep.stop();
     this.wake();
     await this.#claimLoopPromise;
     this.#claimLoopPromise = null;
@@ -230,7 +246,7 @@ export class WorkerRunner {
       }
 
       const lockToken = jobData.lockToken ?? "";
-      const renewer = this.#startLockRenewer(jobData.id, lockToken);
+      const renewer = this.#leaseRenewer.start(jobData.id, lockToken);
       const entry: InFlightEntry = {
         promise: Promise.resolve(),
         jobId: jobData.id,
@@ -247,7 +263,7 @@ export class WorkerRunner {
 
   async #processJob(
     jobData: JobData,
-    renewer: { stop: () => void },
+    renewer: LeaseRenewal,
   ): Promise<void> {
     this.#emitJobStart(jobData);
 
@@ -322,89 +338,6 @@ export class WorkerRunner {
     }
   }
 
-  #startLockRenewer(
-    jobId: string,
-    lockToken: string,
-  ): { stop: () => void } {
-    if (!lockToken || this.#lockRenewMs <= 0) {
-      return { stop: () => {} };
-    }
-
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const tick = async () => {
-      if (stopped) return;
-      try {
-        const ok = await this.#scheduler.extendLock(
-          jobId,
-          this.#leaseMs,
-          lockToken,
-        );
-        if (ok !== "extended") {
-          if (ok === "corrupt") {
-            this.#emitJobCorrupt(jobId, "invalid-json");
-          }
-          this.#emitError(
-            `lease-lost:${jobId}`,
-            new Error(
-              "Lease lost while job was running. Recovery may have requeued it; complete/fail will be no-ops.",
-            ),
-          );
-          stopped = true;
-          return;
-        }
-      } catch (err) {
-        this.#emitError(`extend:${jobId}`, err);
-      }
-      if (!stopped) {
-        timer = setTimeout(tick, this.#lockRenewMs);
-      }
-    };
-
-    timer = setTimeout(tick, this.#lockRenewMs);
-
-    return {
-      stop: () => {
-        stopped = true;
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
-        }
-      },
-    };
-  }
-
-  #startRecoveryTimer(): void {
-    if (this.#recoverIntervalMs <= 0) return;
-    this.#recoverTimer = setInterval(() => {
-      this.#runRecoverySweep();
-    }, this.#recoverIntervalMs);
-  }
-
-  async #runRecoverySweep(): Promise<void> {
-    if (this.#state !== "running") return;
-    try {
-      const recovered = await this.#scheduler.recover(this.#recoverBatchSize);
-      if (recovered.length > 0) {
-        const recoveredJobIds = recovered.filter((id) =>
-          !id.startsWith("corrupt:")
-        );
-        for (const id of recovered) {
-          if (id.startsWith("corrupt:")) {
-            this.#emitJobCorrupt(id.slice("corrupt:".length), "invalid-json");
-          }
-        }
-        if (recoveredJobIds.length === 0) return;
-        try {
-          this.#events.onJobRecovered?.(recoveredJobIds);
-        } catch { /* swallow */ }
-      }
-    } catch (err) {
-      this.#emitError("recover", err);
-    }
-  }
-
   #waitForNotification(): Promise<void> {
     const { promise, resolve } = Promise.withResolvers<void>();
     const timer = setTimeout(() => {
@@ -458,6 +391,12 @@ export class WorkerRunner {
   #emitJobRetry(job: JobData, error: string): void {
     try {
       this.#events.onJobRetry?.(job, error);
+    } catch { /* swallow */ }
+  }
+
+  #emitJobRecovered(jobIds: string[]): void {
+    try {
+      this.#events.onJobRecovered?.(jobIds);
     } catch { /* swallow */ }
   }
 

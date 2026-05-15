@@ -400,6 +400,9 @@ Deno.test("WorkerRunner — recoverIntervalMs=0 disables recovery sweep", async 
 });
 
 // ── Lock renewal ───────────────────────────────────────────────────────
+// Renewal/recovery semantics live in lease_renewer_test.ts and
+// stalled_recovery_sweep_test.ts. These cases only assert that WorkerRunner
+// composes and wires those modules through its lifecycle.
 
 Deno.test("WorkerRunner — extends lease while handler runs", async () => {
   const job = baseJob({ id: "renew", lockToken: "renew-tok" });
@@ -445,57 +448,6 @@ Deno.test("WorkerRunner — extends lease while handler runs", async () => {
   runner.finalize();
 
   expect((client.extendLock as Spy).calls.length).toBeGreaterThanOrEqual(2);
-});
-
-Deno.test("WorkerRunner — lost lease emits lease-lost error and stops renewing", async () => {
-  const job = baseJob({ id: "lost", lockToken: "lost-tok" });
-  let claimed = false;
-  const client = createFakeClient();
-  (client.claimGlobal as Spy) = spy(() => {
-    if (claimed) return Promise.resolve(null);
-    claimed = true;
-    return Promise.resolve(JSON.stringify(job));
-  });
-  (client.extendLock as Spy) = spy(() => Promise.resolve("stale"));
-  (client.complete as Spy) = spy(() => Promise.resolve("stale"));
-
-  const { promise: started, resolve: onStarted } = Promise.withResolvers<
-    void
-  >();
-  const { promise: release, resolve: doRelease } = Promise.withResolvers<
-    void
-  >();
-  const { errors, onError } = createErrorCapture();
-
-  const runner = new WorkerRunner(
-    "emails",
-    async () => {
-      onStarted();
-      await release;
-    },
-    {
-      pollInterval: 5000,
-      leaseMs: 60,
-      lockRenewMs: 20,
-      recoverIntervalMs: 0,
-      events: { onError },
-    },
-    client,
-  );
-
-  runner.start();
-  await started;
-  await new Promise((r) => setTimeout(r, 80));
-  doRelease();
-  await new Promise((r) => setTimeout(r, 30));
-  await runner.stopClaiming();
-  await runner.forceRequeueInflight();
-  runner.finalize();
-
-  const leaseLost = errors.filter((e) => e.context.startsWith("lease-lost:"));
-  expect(leaseLost.length).toBe(1);
-  // After lease lost, renewer stops — only 1 extend call should have been made.
-  expect((client.extendLock as Spy).calls.length).toBe(1);
 });
 
 // ── Stale acks ─────────────────────────────────────────────────────────
