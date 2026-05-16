@@ -1,0 +1,62 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}
+
+/* Panqueue amber theme */
+@theme {
+  --color-amber-brand: hsl(38, 92%, 52%);
+  --color-amber-brand-fg: hsl(30, 8%, 6%);
+}
+
+/* Light mode */
+:root {
+  --color-fd-background: hsl(40, 30%, 98%);
+  --color-fd-foreground: hsl(25, 20%, 12%);
+  --color-fd-muted: hsl(38, 18%, 93%);
+  --color-fd-muted-foreground: hsl(30, 10%, 45%);
+  --color-fd-popover: hsl(40, 25%, 99%);
+  --color-fd-popover-foreground: hsl(25, 20%, 12%);
+  --color-fd-card: hsl(38, 20%, 96%);
+  --color-fd-card-foreground: hsl(25, 20%, 12%);
+  --color-fd-border: hsla(30, 20%, 30%, 0.14);
+  --color-fd-primary: hsl(33, 88%, 42%);
+  --color-fd-primary-foreground: hsl(40, 30%, 98%);
+  --color-fd-secondary: hsl(38, 18%, 90%);
+  --color-fd-secondary-foreground: hsl(25, 20%, 12%);
+  --color-fd-accent: hsla(38, 70%, 50%, 0.12);
+  --color-fd-accent-foreground: hsl(25, 20%, 15%);
+  --color-fd-ring: hsl(33, 88%, 42%);
+}
+
+/* Dark mode */
+.dark {
+  --color-fd-background: hsl(28, 10%, 6%);
+  --color-fd-foreground: hsl(38, 15%, 90%);
+  --color-fd-muted: hsl(28, 10%, 10%);
+  --color-fd-muted-foreground: hsl(38, 8%, 52%);
+  --color-fd-popover: hsl(28, 10%, 9%);
+  --color-fd-popover-foreground: hsl(38, 12%, 88%);
+  --color-fd-card: hsl(28, 10%, 8%);
+  --color-fd-card-foreground: hsl(38, 12%, 92%);
+  --color-fd-border: hsla(38, 25%, 40%, 0.15);
+  --color-fd-primary: hsl(38, 92%, 52%);
+  --color-fd-primary-foreground: hsl(28, 10%, 6%);
+  --color-fd-secondary: hsl(28, 10%, 11%);
+  --color-fd-secondary-foreground: hsl(38, 12%, 88%);
+  --color-fd-accent: hsla(38, 50%, 50%, 0.1);
+  --color-fd-accent-foreground: hsl(38, 25%, 88%);
+  --color-fd-ring: hsl(38, 92%, 52%);
+}
+
+body {
+  background-color: var(--color-fd-background);
+}

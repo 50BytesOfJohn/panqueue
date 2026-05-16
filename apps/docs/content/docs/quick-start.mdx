@@ -1,0 +1,91 @@
+---
+title: Quick Start
+description: A compact Panqueue example you can copy into a Deno project.
+icon: Play
+---
+
+Use this page when you already have Redis running and want the smallest complete
+example.
+
+## Install
+
+```sh
+deno add jsr:@panqueue/config jsr:@panqueue/client jsr:@panqueue/worker
+```
+
+## Define config
+
+```ts title="panqueue.config.ts"
+import { definePanqueueConfig } from "@panqueue/config";
+
+type Queues = {
+  email: { to: string; subject: string };
+};
+
+export const pq = definePanqueueConfig<Queues>({
+  redis: { url: "redis://localhost:6379" },
+  queues: {
+    email: { concurrency: { scope: "global" } },
+  },
+});
+```
+
+## Enqueue work
+
+```ts title="enqueue.ts"
+import { createQueueClient } from "@panqueue/client";
+import { pq } from "./panqueue.config.ts";
+
+await using client = createQueueClient(pq);
+
+await client.enqueue("email", {
+  to: "user@example.com",
+  subject: "Hello from Panqueue",
+}, {
+  retries: 3,
+});
+```
+
+## Process work
+
+```ts title="worker.ts"
+import { defineWorker, WorkerPool } from "@panqueue/worker";
+import { pq } from "./panqueue.config.ts";
+
+const emailWorker = defineWorker(pq, "email", async (job) => {
+  console.log(`send "${job.data.subject}" to ${job.data.to}`);
+}, {
+  concurrency: 5,
+  events: {
+    onJobComplete(job) {
+      console.log(`completed ${job.id}`);
+    },
+    onJobFail(job, error) {
+      console.error(`failed ${job.id}`, error);
+    },
+  },
+});
+
+await using pool = new WorkerPool(pq, {
+  workers: [emailWorker],
+});
+
+await pool.start();
+```
+
+## Run it
+
+Start the worker process in one terminal:
+
+```sh
+deno run -A worker.ts
+```
+
+Enqueue a job from another terminal:
+
+```sh
+deno run -A enqueue.ts
+```
+
+The worker receives the job from Redis, runs the processor, and records the job
+state with Panqueue's Redis scripts.

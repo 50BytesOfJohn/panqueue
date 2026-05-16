@@ -1,0 +1,118 @@
+---
+title: Getting Started
+description: Define queues, enqueue work, and process jobs with a worker pool.
+icon: Rocket
+---
+
+This guide creates one typed queue named `email`, adds a job to it, and starts a
+worker that processes jobs from Redis.
+
+## 1. Define your queues
+
+Create a shared config file. The generic maps each queue ID to the payload shape
+that jobs in that queue must use.
+
+```ts title="panqueue.config.ts"
+import { definePanqueueConfig } from "@panqueue/config";
+
+type Queues = {
+  email: {
+    to: string;
+    subject: string;
+    body: string;
+  };
+};
+
+export const pq = definePanqueueConfig<Queues>({
+  redis: { url: "redis://localhost:6379" },
+  queues: {
+    email: { concurrency: { scope: "global" } },
+  },
+});
+```
+
+Importing this file is safe. It only returns configuration and does not open any
+network connections.
+
+## 2. Enqueue a job
+
+Create a producer client from the shared config. Queue names and payloads are
+checked by TypeScript.
+
+```ts title="enqueue.ts"
+import { createQueueClient } from "@panqueue/client";
+import { pq } from "./panqueue.config.ts";
+
+await using client = createQueueClient(pq);
+
+const jobId = await client.enqueue("email", {
+  to: "user@example.com",
+  subject: "Welcome to Panqueue",
+  body: "Your first job is in Redis.",
+});
+
+console.log(`queued ${jobId}`);
+```
+
+`QueueClient` connects lazily when you enqueue. You can also call
+`await client.connect()` during startup if you want to verify Redis connectivity
+early.
+
+## 3. Define a worker
+
+A worker definition is pure data. It captures the queue ID, processor, and
+worker options, but it does not start processing by itself.
+
+```ts title="workers/email.ts"
+import { defineWorker } from "@panqueue/worker";
+import { pq } from "../panqueue.config.ts";
+
+export const emailWorker = defineWorker(pq, "email", async (job) => {
+  await sendEmail(job.data);
+}, {
+  concurrency: 5,
+});
+
+async function sendEmail(message: {
+  to: string;
+  subject: string;
+  body: string;
+}) {
+  console.log(`sending "${message.subject}" to ${message.to}`);
+}
+```
+
+## 4. Run the worker pool
+
+The worker pool opens Redis connections and runs the worker definitions you pass
+to it.
+
+```ts title="worker.ts"
+import { WorkerPool } from "@panqueue/worker";
+import { pq } from "./panqueue.config.ts";
+import { emailWorker } from "./workers/email.ts";
+
+await using pool = new WorkerPool(pq, {
+  workers: [emailWorker],
+});
+
+await pool.start();
+```
+
+Keep this process running. Each worker handles one queue, and the pool owns the
+Redis connections for all registered workers.
+
+## 5. Shut down cleanly
+
+Force shutdown is the default. It stops claiming new jobs, atomically requeues
+in-flight jobs, and disconnects.
+
+```ts
+await pool.shutdown();
+```
+
+Use drain mode when you want to wait for active handlers before disconnecting:
+
+```ts
+await pool.shutdown({ drain: true, timeout: 30_000 });
+```

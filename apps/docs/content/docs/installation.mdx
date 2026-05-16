@@ -1,0 +1,51 @@
+---
+title: Installation
+description: Install Panqueue and prepare Redis for local development.
+icon: Package
+---
+
+Panqueue is split into three public packages:
+
+| Package | Use it for |
+| --- | --- |
+| `@panqueue/config` | Shared queue definitions and payload types |
+| `@panqueue/client` | Producers that enqueue jobs |
+| `@panqueue/worker` | Workers that process jobs |
+
+## Install packages
+
+```sh
+deno add jsr:@panqueue/config jsr:@panqueue/client jsr:@panqueue/worker
+```
+
+For a producer-only service, install `@panqueue/config` and
+`@panqueue/client`. For a worker-only service, install `@panqueue/config` and
+`@panqueue/worker`.
+
+## Start Redis
+
+Panqueue stores queue state in Redis. For local development, run Redis with
+Docker:
+
+```sh
+docker run --name panqueue-redis -p 6379:6379 redis:7
+```
+
+Use the Redis URL in your config:
+
+```ts
+const redisUrl = "redis://localhost:6379";
+```
+
+## Runtime requirements
+
+| Requirement | Version |
+| --- | --- |
+| Runtime | Deno |
+| Storage | Redis 7+ |
+| Payloads | JSON-serializable values |
+
+<Callout title="Connection ownership">
+  Panqueue owns Redis clients internally. Pass Redis connection configuration to
+  the client and worker pool instead of creating Redis clients yourself.
+</Callout>

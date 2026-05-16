@@ -1,0 +1,10 @@
+.DS_Store
+/node_modules/
+/.pnpm-store/
+
+.env.local
+
+dist
+.source
+src/pages.gen.ts
+.vercel

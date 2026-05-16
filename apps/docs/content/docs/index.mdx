@@ -1,0 +1,51 @@
+---
+title: Panqueue
+description: Redis-backed job queues for Deno, with typed producers and workers.
+icon: Boxes
+---
+
+Panqueue is a Deno-native job queue backed by Redis. It gives you typed queue
+payloads, atomic Redis transitions, and at-least-once delivery without adding a
+hosted queue service to your stack.
+
+<Callout type="warn" title="Pre-release">
+  Panqueue is not released yet. The docs describe the current shape of the
+  library while the API is stabilising toward the first public version.
+</Callout>
+
+## What Panqueue gives you
+
+- Type-safe queue IDs and payloads from a shared config
+- A small producer API for enqueueing jobs
+- Worker definitions that stay separate from worker lifecycle
+- A `WorkerPool` that owns Redis connections and shutdown
+- Lease-based recovery for jobs left behind by crashed workers
+
+## Start here
+
+<Cards>
+  <Card
+    title="Installation"
+    description="Add the Panqueue packages and run Redis locally."
+    href="/docs/installation"
+  />
+  <Card
+    title="Getting started"
+    description="Create a config, enqueue a job, and run a worker."
+    href="/docs/getting-started"
+  />
+  <Card
+    title="Quick start"
+    description="The smallest complete example in one place."
+    href="/docs/quick-start"
+  />
+</Cards>
+
+## Current scope
+
+Panqueue currently targets Deno and Redis 7+. The first version focuses on
+global FIFO queues, JSON-serializable payloads, inline processors, retries, and
+reliable worker shutdown.
+
+Detailed API reference, deployment notes, and operational guides will come after
+the first tutorial pages are stable.
