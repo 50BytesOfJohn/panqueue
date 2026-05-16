@@ -10,7 +10,7 @@ import {
   ViewOptionsPopover,
 } from 'fumadocs-ui/layouts/docs/page';
 import { unstable_notFound } from 'waku/router/server';
-import { gitConfig } from '@/lib/shared';
+import { absoluteUrl, appName, gitConfig } from '@/lib/shared';
 import { getMDXComponents } from '@/components/mdx';
 
 export default function Page({ slugs }: PageProps<'/docs/[...slugs]'>) {
@@ -18,10 +18,28 @@ export default function Page({ slugs }: PageProps<'/docs/[...slugs]'>) {
   if (!page) unstable_notFound();
 
   const MDX = page.data.body;
+  const title = `${page.data.title} | ${appName}`;
+  const description = page.data.description;
+  const pageUrl = absoluteUrl(page.url);
+  const imageUrl = absoluteUrl(getPageImage(slugs).url);
   const markdownUrl = getPageMarkdownUrl(page).url;
   return (
     <DocsPage toc={page.data.toc}>
-      <meta property="og:image" content={getPageImage(slugs).url} />
+      <title>{title}</title>
+      <link rel="canonical" href={pageUrl} />
+      <meta name="description" content={description} />
+      <meta property="og:type" content="website" />
+      <meta property="og:title" content={title} />
+      <meta property="og:description" content={description} />
+      <meta property="og:url" content={pageUrl} />
+      <meta property="og:image" content={imageUrl} />
+      <meta property="og:image:width" content="1200" />
+      <meta property="og:image:height" content="630" />
+      <meta property="og:image:type" content="image/webp" />
+      <meta name="twitter:card" content="summary_large_image" />
+      <meta name="twitter:title" content={title} />
+      <meta name="twitter:description" content={description} />
+      <meta name="twitter:image" content={imageUrl} />
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
       <div className="flex flex-row gap-2 items-center border-b pt-2 pb-6">
