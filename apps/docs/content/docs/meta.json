@@ -1,4 +1,11 @@
 {
   "title": "Documentation",
-  "pages": ["index", "installation", "getting-started", "quick-start"]
+  "pages": [
+    "index",
+    "installation",
+    "getting-started",
+    "quick-start",
+    "---Configuration---",
+    "config-package"
+  ]
 }

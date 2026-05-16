@@ -1,0 +1,299 @@
+---
+title: Config Package
+description: Define shared queue names, payload types, Redis connection options, and per-queue settings.
+icon: SlidersHorizontal
+---
+
+The `@panqueue/config` package is the shared contract for a Panqueue app. Put
+queue IDs, payload types, Redis connection options, and queue settings in one
+file, then import that file from producers and workers.
+
+<Cards>
+  <Card
+    title="Queue names"
+    description="Every client enqueue and worker definition is checked against the same queue IDs."
+  />
+  <Card
+    title="Payload types"
+    description="Each queue gets its own JSON-serializable payload shape."
+  />
+  <Card
+    title="Connection config"
+    description="Clients and worker pools open Redis connections from the same options."
+  />
+</Cards>
+
+## Define a config
+
+<Steps>
+  <Step>
+    Create a `panqueue.config.ts` file that exports one shared config.
+
+    ```ts title="panqueue.config.ts"
+    import { definePanqueueConfig } from "@panqueue/config";
+
+    type Queues = {
+      email: {
+        to: string;
+        subject: string;
+        body: string;
+      };
+      thumbnail: {
+        imageUrl: string;
+        width: number;
+      };
+    };
+
+    export const pq = definePanqueueConfig<Queues>({
+      redis: { url: Deno.env.get("REDIS_URL") ?? "redis://localhost:6379" },
+      queues: {
+        email: { concurrency: { scope: "global" } },
+        thumbnail: {},
+      },
+    });
+    ```
+  </Step>
+
+  <Step>
+    Import the config anywhere that needs queue types.
+
+    ```ts title="enqueue.ts"
+    import { createQueueClient } from "@panqueue/client";
+    import { pq } from "./panqueue.config.ts";
+
+    await using client = createQueueClient(pq);
+
+    await client.enqueue("email", {
+      to: "user@example.com",
+      subject: "Welcome",
+      body: "Thanks for signing up.",
+    });
+    ```
+
+    ```ts title="workers/email.ts"
+    import { defineWorker } from "@panqueue/worker";
+    import { pq } from "../panqueue.config.ts";
+
+    export const emailWorker = defineWorker(pq, "email", async (job) => {
+      await sendEmail(job.data);
+    });
+    ```
+  </Step>
+</Steps>
+
+`definePanqueueConfig` is an identity function. It returns the object unchanged,
+opens no Redis connections, and exists so TypeScript can infer queue IDs and
+payload types from the same value you pass to `createQueueClient`,
+`defineWorker`, and `WorkerPool`.
+
+## Queue payloads
+
+The generic passed to `definePanqueueConfig` maps queue IDs to payload types.
+Payloads must be JSON-serializable: strings, numbers, booleans, null, arrays,
+and plain objects made from those values.
+
+```ts
+type Queues = {
+  email: {
+    to: string;
+    subject: string;
+    body: string;
+    templateId?: string;
+  };
+  resizeImage: {
+    sourceUrl: string;
+    sizes: number[];
+  };
+  syncUser: {
+    userId: string;
+    reason: "created" | "updated" | "deleted";
+  };
+};
+```
+
+Avoid `Date`, `Map`, `Set`, functions, class instances, and binary values in
+payloads. Serialize them into plain JSON values before enqueueing.
+
+<Callout type="info" title="Types flow from the config">
+  If you enqueue to `resizeImage`, TypeScript expects the `resizeImage` payload.
+  If you define a worker for `email`, `job.data` is the `email` payload.
+</Callout>
+
+## Redis connection
+
+`redis` accepts the same connection options everywhere Panqueue opens Redis.
+
+<Tabs items={["URL string", "URL object", "Host options"]}>
+  <Tab value="URL string">
+
+    ```ts
+    export const pq = definePanqueueConfig<Queues>({
+      redis: "redis://localhost:6379",
+      queues: {
+        email: {},
+      },
+    });
+    ```
+
+  </Tab>
+  <Tab value="URL object">
+
+    ```ts
+    export const pq = definePanqueueConfig<Queues>({
+      redis: { url: "redis://localhost:6379" },
+      queues: {
+        email: {},
+      },
+    });
+    ```
+
+  </Tab>
+  <Tab value="Host options">
+
+    ```ts
+    export const pq = definePanqueueConfig<Queues>({
+      redis: {
+        host: "localhost",
+        port: 6379,
+        db: 0,
+        tls: false,
+      },
+      queues: {
+        email: {},
+      },
+    });
+    ```
+
+  </Tab>
+</Tabs>
+
+Use environment variables in the config file when connection values differ by
+environment:
+
+```ts
+const redisUrl = Deno.env.get("REDIS_URL");
+
+if (!redisUrl) {
+  throw new Error("REDIS_URL is required");
+}
+
+export const pq = definePanqueueConfig<Queues>({
+  redis: { url: redisUrl },
+  queues: {
+    email: {},
+  },
+});
+```
+
+## Queue settings
+
+Every key in `queues` must match a key in the `Queues` type. Use an empty object
+for default behavior.
+
+```ts
+type Queues = {
+  email: { to: string; subject: string };
+  image: { url: string; width: number };
+};
+
+export const pq = definePanqueueConfig<Queues>({
+  redis: "redis://localhost:6379",
+  queues: {
+    email: { concurrency: { scope: "global" } },
+    image: {},
+  },
+});
+```
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `concurrency.scope` | `"global"` | Global scope | Applies queue concurrency as a queue-wide limit. |
+
+Worker-level concurrency still belongs on `defineWorker`:
+
+```ts
+const emailWorker = defineWorker(pq, "email", async (job) => {
+  await sendEmail(job.data);
+}, {
+  concurrency: 5,
+});
+```
+
+Use the config for shared queue shape and queue-level settings. Use worker
+options for process behavior such as handler concurrency, polling, leases,
+recovery, and event handlers.
+
+## Share it across packages
+
+A small Panqueue project can keep the config at the repository root:
+
+```txt
+.
+├── panqueue.config.ts
+├── enqueue.ts
+└── worker.ts
+```
+
+Larger projects can put the config in a shared internal package:
+
+```txt
+.
+├── packages
+│   └── queue-config
+│       └── mod.ts
+├── apps
+│   ├── api
+│   └── worker
+└── deno.json
+```
+
+Export only the config and the queue type from that package:
+
+```ts title="packages/queue-config/mod.ts"
+import { definePanqueueConfig } from "@panqueue/config";
+
+export type Queues = {
+  email: { to: string; subject: string; body: string };
+  thumbnail: { imageUrl: string; width: number };
+};
+
+export const pq = definePanqueueConfig<Queues>({
+  redis: { url: Deno.env.get("REDIS_URL") ?? "redis://localhost:6379" },
+  queues: {
+    email: {},
+    thumbnail: {},
+  },
+});
+```
+
+<Callout type="warn" title="Keep config import-safe">
+  The config file should define values, not start workers or enqueue jobs. That
+  keeps imports safe in producer processes, worker processes, tests, and scripts.
+</Callout>
+
+## API reference
+
+```ts
+function definePanqueueConfig<TQueues extends QueueMap>(
+  config: PanqueueConfig<TQueues>,
+): PanqueueConfig<TQueues>;
+```
+
+| Export | Kind | Description |
+| --- | --- | --- |
+| `definePanqueueConfig` | Function | Defines a typed Panqueue config and returns it unchanged. |
+| `PanqueueConfig<TQueues>` | Type | Shared config object with `redis` and `queues`. |
+| `QueueConfig` | Type | Per-queue settings inside `queues`. |
+
+```ts
+interface PanqueueConfig<TQueues extends QueueMap> {
+  redis: ConnectionOptions;
+  queues: { [K in keyof TQueues]: QueueConfig };
+}
+
+interface QueueConfig {
+  concurrency?: {
+    scope: "global";
+  };
+}
+```
