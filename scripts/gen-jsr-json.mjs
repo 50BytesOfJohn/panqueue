@@ -53,8 +53,6 @@ for (const { version, pkg, dir } of packages.values()) {
     ...(Object.keys(imports).length > 0 ? { imports } : {}),
     publish: {
       exclude: [
-        "**/*_test.ts",
-        "**/*.test.ts",
         "tsconfig.json",
         "tsdown.config.ts",
         "moon.yml",

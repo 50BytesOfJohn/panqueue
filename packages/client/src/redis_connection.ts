@@ -18,11 +18,6 @@ export interface PanqueueProducerClient {
   ): Promise<unknown>;
 }
 
-/** @internal Exposed for test stubbing only. */
-export const _internals: { createClient: typeof createClient } = {
-  createClient,
-};
-
 function buildClientOptions(options: ConnectionOptions): RedisClientOptions {
   if (typeof options === "string") {
     return { url: options };
@@ -72,7 +67,7 @@ export class RedisConnection {
   }
 
   async #doConnect(): Promise<void> {
-    const client = _internals.createClient({
+    const client = createClient({
       ...buildClientOptions(this.#options),
       scripts: CLIENT_SCRIPTS,
     });

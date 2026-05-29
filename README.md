@@ -188,8 +188,7 @@ and releases by [Release Please](https://github.com/googleapis/release-please).
 ```
 packages/        Published packages — core, config, client, worker
 apps/docs/       Documentation site (Waku + Fumadocs)
-smoke/           Bun + Deno smoke tests of the built artifacts
-demo/            Integration tests and demo scripts (Deno)
+demo/            Demo scripts (Deno)
 benchmarks/      BullMQ comparison benchmarks
 ```
 

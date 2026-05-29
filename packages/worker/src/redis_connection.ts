@@ -83,11 +83,6 @@ export interface PanqueueWorkerClient {
   ): Promise<unknown>;
 }
 
-/** @internal Exposed for test stubbing only. */
-export const _internals: { createClient: typeof createClient } = {
-  createClient,
-};
-
 function buildClientOptions(options: ConnectionOptions): RedisClientOptions {
   if (typeof options === "string") {
     return { url: options };
@@ -114,7 +109,7 @@ function buildClientOptions(options: ConnectionOptions): RedisClientOptions {
 }
 
 async function openRawClient(options: ConnectionOptions) {
-  const client = _internals.createClient({
+  const client = createClient({
     ...buildClientOptions(options),
     scripts: WORKER_SCRIPTS,
   });

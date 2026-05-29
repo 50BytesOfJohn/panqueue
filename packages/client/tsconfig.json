@@ -1,5 +1,4 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["mod.ts", "src/**/*.ts"],
-  "exclude": ["src/**/*_test.ts", "src/**/_test_utils.ts"]
+  "include": ["mod.ts", "src/**/*.ts"]
 }
