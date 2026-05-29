@@ -1,4 +1,4 @@
-import type { JobData, JsonSerializable } from "@panqueue/internal";
+import type { JobData, JsonSerializable } from "@panqueue/core";
 import {
   activeKey,
   completedKey,
@@ -8,8 +8,8 @@ import {
   jobsKey,
   notifyKey,
   waitingKey,
-} from "@panqueue/internal";
-import type { PanqueueWorkerClient } from "../redis_connection.ts";
+} from "@panqueue/core";
+import type { PanqueueWorkerClient } from "../redis_connection.js";
 
 /** Outcome of a complete() call. */
 export type CompleteResult = "completed" | "stale" | "missing" | "corrupt";

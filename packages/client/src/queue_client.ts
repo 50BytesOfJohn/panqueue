@@ -4,15 +4,15 @@ import type {
   JobData,
   JobOptions,
   QueueMap,
-} from "@panqueue/internal";
+} from "@panqueue/core";
 import {
   assertJsonSerializable,
   generateJobId,
   jobsKey,
   notifyKey,
   waitingKey,
-} from "@panqueue/internal";
-import { RedisConnection } from "./redis_connection.ts";
+} from "@panqueue/core";
+import { RedisConnection } from "./redis_connection.js";
 
 /** Options for enqueuing a job. */
 export type EnqueueOptions = JobOptions;
@@ -143,7 +143,7 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
  *
  * @example
  * ```ts
- * import { pq } from "./panqueue.config.ts";
+ * import { pq } from "./panqueue.config.js";
  * const client = createQueueClient(pq);
  * await client.enqueue("emails", { to: "a@b.com", subject: "Hi" });
  * ```

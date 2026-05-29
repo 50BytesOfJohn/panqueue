@@ -5,11 +5,11 @@ export {
   QueueClient,
   type QueueClientConfig,
   type QueueClientOptions,
-} from "./src/queue_client.ts";
+} from "./src/queue_client.js";
 export {
   type PanqueueProducerClient,
   RedisConnection,
-} from "./src/redis_connection.ts";
+} from "./src/redis_connection.js";
 
 export type { PanqueueConfig, QueueConfig } from "@panqueue/config";
 
@@ -20,4 +20,4 @@ export type {
   JobStatus,
   JsonSerializable,
   QueueMap,
-} from "@panqueue/internal";
+} from "@panqueue/core";

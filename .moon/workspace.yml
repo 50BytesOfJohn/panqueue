@@ -1,0 +1,13 @@
+# Project graph: the four publishable packages plus a root project that owns
+# workspace-wide tasks (test, publish).
+$schema: "https://moonrepo.dev/schemas/workspace.json"
+
+projects:
+  globs:
+    - "packages/*"
+  sources:
+    root: "."
+
+vcs:
+  defaultBranch: "main"
+  provider: "github"

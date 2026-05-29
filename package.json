@@ -6,9 +6,26 @@
     "node": ">=22"
   },
   "scripts": {
+    "build": "pnpm --filter \"./packages/*\" -r build",
+    "typecheck": "pnpm --filter \"./packages/*\" -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke:bun": "bun run smoke/smoke.ts",
+    "smoke:deno": "deno run --allow-env --allow-read --config smoke/deno.json smoke/smoke.ts",
+    "gen:jsr": "node scripts/gen-jsr-json.mjs",
     "docs:dev": "pnpm --filter @panqueue/docs dev",
     "docs:build": "pnpm --filter @panqueue/docs build",
     "docs:start": "pnpm --filter @panqueue/docs start",
     "docs:typecheck": "pnpm --filter @panqueue/docs types:check"
+  },
+  "devDependencies": {
+    "@panqueue/client": "workspace:*",
+    "@panqueue/config": "workspace:*",
+    "@panqueue/core": "workspace:*",
+    "@panqueue/worker": "workspace:*",
+    "publint": "^0.3.21",
+    "tsdown": "^0.22.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }

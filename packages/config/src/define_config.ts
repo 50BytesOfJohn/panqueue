@@ -1,5 +1,5 @@
-import type { QueueMap } from "@panqueue/internal";
-import type { PanqueueConfig } from "./types.ts";
+import type { QueueMap } from "@panqueue/core";
+import type { PanqueueConfig } from "./types.js";
 
 /**
  * Identity function for defining a type-safe panqueue configuration.
@@ -18,7 +18,7 @@ import type { PanqueueConfig } from "./types.ts";
  * };
  *
  * export const pq = definePanqueueConfig<MyQueues>({
- *   redis: { url: Deno.env.get("REDIS_URL")! },
+ *   redis: { url: process.env.REDIS_URL ?? "redis://localhost:6379" },
  *   queues: {
  *     email: {},
  *     image: {},

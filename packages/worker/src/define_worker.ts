@@ -1,5 +1,5 @@
 import type { PanqueueConfig } from "@panqueue/config";
-import type { JobData, JsonSerializable, QueueMap } from "@panqueue/internal";
+import type { JobData, JsonSerializable, QueueMap } from "@panqueue/core";
 
 /** Processor function invoked for each claimed job. */
 export type Processor<T extends JsonSerializable = JsonSerializable> = (

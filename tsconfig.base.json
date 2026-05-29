@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "paths": {
+      "@panqueue/core": ["./packages/core/mod.ts"],
+      "@panqueue/config": ["./packages/config/mod.ts"],
+      "@panqueue/client": ["./packages/client/mod.ts"],
+      "@panqueue/worker": ["./packages/worker/mod.ts"]
+    },
+
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "esnext",
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "types": [],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "skipLibCheck": true,
+
+    "declaration": true,
+    "isolatedDeclarations": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+
+    "noEmit": true
+  }
+}

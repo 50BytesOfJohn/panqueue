@@ -1,6 +1,6 @@
 import { createClient, type RedisClientOptions } from "redis";
-import type { ConnectionOptions } from "@panqueue/internal";
-import { CLIENT_SCRIPTS } from "./scripts.ts";
+import type { ConnectionOptions } from "@panqueue/core";
+import { CLIENT_SCRIPTS } from "./scripts.js";
 
 /**
  * Producer-side command surface exposed to {@link QueueClient}. A narrow
@@ -19,7 +19,9 @@ export interface PanqueueProducerClient {
 }
 
 /** @internal Exposed for test stubbing only. */
-export const _internals = { createClient };
+export const _internals: { createClient: typeof createClient } = {
+  createClient,
+};
 
 function buildClientOptions(options: ConnectionOptions): RedisClientOptions {
   if (typeof options === "string") {

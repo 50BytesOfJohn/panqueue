@@ -1,0 +1,35 @@
+# Root project: workspace-wide tasks that run once (not per package).
+$schema: "https://moonrepo.dev/schemas/project.json"
+layer: application
+language: typescript
+
+tasks:
+  # Authoritative Vitest suite on Node, run against package source.
+  test:
+    command: "pnpm exec vitest run"
+    inputs:
+      - "packages/*/mod.ts"
+      - "packages/*/src/**/*"
+      - "vitest.config.ts"
+      - "test/**/*"
+
+  # Publish every package to npm. pnpm (not bare npm) rewrites `workspace:*`
+  # to concrete version ranges in the tarball. Provenance is enabled via the
+  # NPM_CONFIG_PROVENANCE env var in CI (needs OIDC `id-token: write`).
+  publish-npm:
+    command: "pnpm --filter \"./packages/*\" -r publish --access public --no-git-checks"
+    deps:
+      - "core:build"
+      - "config:build"
+      - "client:build"
+      - "worker:build"
+    options:
+      cache: false
+      runInCI: true
+
+  # Generate jsr.json from each package.json, then publish source to JSR.
+  publish-jsr:
+    command: "node scripts/publish-jsr.mjs"
+    options:
+      cache: false
+      runInCI: true

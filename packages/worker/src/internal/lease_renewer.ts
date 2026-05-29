@@ -1,4 +1,4 @@
-import type { BaseJobScheduler } from "../scheduler/base.ts";
+import type { BaseJobScheduler } from "../scheduler/base.js";
 
 /** Collaborators and tuning a {@link LeaseRenewer} needs. */
 export interface LeaseRenewerOptions {

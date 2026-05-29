@@ -1,4 +1,4 @@
-import type { ConnectionOptions, QueueMap } from "@panqueue/internal";
+import type { ConnectionOptions, QueueMap } from "@panqueue/core";
 
 /** Per-queue configuration within the shared config. */
 export interface QueueConfig {

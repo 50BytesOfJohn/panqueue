@@ -1,16 +1,16 @@
-import type { JobData } from "@panqueue/internal";
+import type { JobData } from "@panqueue/core";
 import type {
   Processor,
   WorkerDefinitionOptions,
   WorkerEventHandlers,
   WorkerState,
-} from "../define_worker.ts";
-import type { PanqueueWorkerClient } from "../redis_connection.ts";
-import { GlobalJobScheduler } from "../scheduler/global.ts";
-import type { BaseJobScheduler } from "../scheduler/base.ts";
-import { Semaphore } from "../semaphore.ts";
-import { LeaseRenewer, type LeaseRenewal } from "./lease_renewer.ts";
-import { StalledRecoverySweep } from "./stalled_recovery_sweep.ts";
+} from "../define_worker.js";
+import type { PanqueueWorkerClient } from "../redis_connection.js";
+import { GlobalJobScheduler } from "../scheduler/global.js";
+import type { BaseJobScheduler } from "../scheduler/base.js";
+import { Semaphore } from "../semaphore.js";
+import { LeaseRenewer, type LeaseRenewal } from "./lease_renewer.js";
+import { StalledRecoverySweep } from "./stalled_recovery_sweep.js";
 
 interface InFlightEntry {
   promise: Promise<void>;

@@ -1,0 +1,27 @@
+# Inherited by every package tagged `publishable` (the four library packages).
+# The DAG edge `^:build` makes a package build its dependencies first, so
+# e.g. worker:build runs after core:build and config:build.
+$schema: "https://moonrepo.dev/schemas/tasks.json"
+
+tasks:
+  build:
+    command: "pnpm exec tsdown"
+    inputs:
+      - "mod.ts"
+      - "src/**/*"
+      - "tsdown.config.ts"
+      - "tsconfig.json"
+      - "/tsconfig.base.json"
+      - "package.json"
+    outputs:
+      - "dist"
+    deps:
+      - "^:build"
+
+  typecheck:
+    command: "pnpm exec tsc -p tsconfig.json --isolatedDeclarations false --declaration false"
+    inputs:
+      - "mod.ts"
+      - "src/**/*"
+      - "tsconfig.json"
+      - "/tsconfig.base.json"

@@ -2,6 +2,10 @@
 node_modules/
 .pnpm-store/
 .turbo/
+.moon/cache/
 dist/
 coverage/
 pnpm-debug.log*
+
+# Generated at publish time from package.json (see scripts/gen-jsr-json.mjs)
+packages/*/jsr.json
