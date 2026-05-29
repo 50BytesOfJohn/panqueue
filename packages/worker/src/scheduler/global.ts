@@ -6,7 +6,7 @@ import {
   jobsKey,
   waitingKey,
 } from "@panqueue/core";
-import type { PanqueueWorkerClient } from "../redis_connection.js";
+import type { PanqueueWorkerClient } from "../redis-connection.js";
 import { BaseJobScheduler, type ClaimResult } from "./base.js";
 
 /**

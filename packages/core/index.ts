@@ -21,5 +21,5 @@ export {
   waitingKey,
 } from "./src/keys.js";
 
-export { generateJobId } from "./src/job_id.js";
+export { generateJobId } from "./src/job-id.js";
 export { assertJsonSerializable } from "./src/serialization.js";

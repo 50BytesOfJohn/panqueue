@@ -10,8 +10,6 @@
     "typecheck": "pnpm --filter \"./packages/*\" -r typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke:bun": "bun run smoke/smoke.ts",
-    "smoke:deno": "deno run --allow-env --allow-read --config smoke/deno.json smoke/smoke.ts",
     "gen:jsr": "node scripts/gen-jsr-json.mjs",
     "docs:dev": "pnpm --filter @panqueue/docs dev",
     "docs:build": "pnpm --filter @panqueue/docs build",

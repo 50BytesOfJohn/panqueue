@@ -9,7 +9,7 @@ import {
   notifyKey,
   waitingKey,
 } from "@panqueue/core";
-import type { PanqueueWorkerClient } from "../redis_connection.js";
+import type { PanqueueWorkerClient } from "../redis-connection.js";
 
 /** Outcome of a complete() call. */
 export type CompleteResult = "completed" | "stale" | "missing" | "corrupt";

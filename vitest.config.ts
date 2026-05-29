@@ -7,21 +7,20 @@ const fromRoot = (path: string): string =>
 /**
  * Authoritative Node test suite. Tests run against package *source* (not the
  * built artifact): `@panqueue/*` specifiers are aliased to each package's
- * `mod.ts`, so the suite needs no prior build. The built/packed artifact is
+ * `index.ts`, so the suite needs no prior build. The built/packed artifact is
  * exercised separately by the Bun and Deno smoke tests.
  */
 export default defineConfig({
   resolve: {
     alias: {
-      "@panqueue/core": fromRoot("./packages/core/mod.ts"),
-      "@panqueue/config": fromRoot("./packages/config/mod.ts"),
-      "@panqueue/client": fromRoot("./packages/client/mod.ts"),
-      "@panqueue/worker": fromRoot("./packages/worker/mod.ts"),
-      "@test/std": fromRoot("./test/std-compat.ts"),
+      "@panqueue/core": fromRoot("./packages/core/index.ts"),
+      "@panqueue/config": fromRoot("./packages/config/index.ts"),
+      "@panqueue/client": fromRoot("./packages/client/index.ts"),
+      "@panqueue/worker": fromRoot("./packages/worker/index.ts"),
     },
   },
   test: {
-    include: ["packages/*/src/**/*_test.ts"],
+    include: ["packages/*/src/**/*.test.ts"],
     environment: "node",
   },
 });

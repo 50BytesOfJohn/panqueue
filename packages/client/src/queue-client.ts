@@ -12,7 +12,7 @@ import {
   notifyKey,
   waitingKey,
 } from "@panqueue/core";
-import { RedisConnection } from "./redis_connection.js";
+import { RedisConnection } from "./redis-connection.js";
 
 /** Options for enqueuing a job. */
 export type EnqueueOptions = JobOptions;

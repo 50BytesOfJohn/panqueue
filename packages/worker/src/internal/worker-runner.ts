@@ -4,13 +4,13 @@ import type {
   WorkerDefinitionOptions,
   WorkerEventHandlers,
   WorkerState,
-} from "../define_worker.js";
-import type { PanqueueWorkerClient } from "../redis_connection.js";
+} from "../define-worker.js";
+import type { PanqueueWorkerClient } from "../redis-connection.js";
 import { GlobalJobScheduler } from "../scheduler/global.js";
 import type { BaseJobScheduler } from "../scheduler/base.js";
 import { Semaphore } from "../semaphore.js";
-import { LeaseRenewer, type LeaseRenewal } from "./lease_renewer.js";
-import { StalledRecoverySweep } from "./stalled_recovery_sweep.js";
+import { LeaseRenewer, type LeaseRenewal } from "./lease-renewer.js";
+import { StalledRecoverySweep } from "./stalled-recovery-sweep.js";
 
 interface InFlightEntry {
   promise: Promise<void>;

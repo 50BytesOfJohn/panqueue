@@ -1,12 +1,12 @@
 import type { PanqueueConfig } from "@panqueue/config";
 import type { ConnectionOptions, QueueMap } from "@panqueue/core";
 import { notifyKey } from "@panqueue/core";
-import { isWorkerDefinition, type WorkerDefinition } from "./define_worker.js";
+import { isWorkerDefinition, type WorkerDefinition } from "./define-worker.js";
 import {
   RedisConnection,
   type RedisSubscriberConnection,
-} from "./redis_connection.js";
-import { WorkerRunner } from "./internal/worker_runner.js";
+} from "./redis-connection.js";
+import { WorkerRunner } from "./internal/worker-runner.js";
 
 /** Options accepted by {@link WorkerPool.shutdown}. */
 export interface ShutdownOptions {

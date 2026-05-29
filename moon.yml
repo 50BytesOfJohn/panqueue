@@ -8,7 +8,7 @@ tasks:
   test:
     command: "pnpm exec vitest run"
     inputs:
-      - "packages/*/mod.ts"
+      - "packages/*/index.ts"
       - "packages/*/src/**/*"
       - "vitest.config.ts"
       - "test/**/*"

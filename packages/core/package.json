@@ -6,10 +6,10 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./dist/mod.js",
+    ".": "./dist/index.js",
     "./package.json": "./package.json"
   },
-  "types": "./dist/mod.d.ts",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],

@@ -7,7 +7,7 @@ tasks:
   build:
     command: "pnpm exec tsdown"
     inputs:
-      - "mod.ts"
+      - "index.ts"
       - "src/**/*"
       - "tsdown.config.ts"
       - "tsconfig.json"
@@ -21,7 +21,7 @@ tasks:
   typecheck:
     command: "pnpm exec tsc -p tsconfig.json --isolatedDeclarations false --declaration false"
     inputs:
-      - "mod.ts"
+      - "index.ts"
       - "src/**/*"
       - "tsconfig.json"
       - "/tsconfig.base.json"

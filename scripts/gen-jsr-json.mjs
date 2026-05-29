@@ -6,7 +6,7 @@
 // publish time to keep the two registries in lock-step. Note the two `exports`
 // definitions point at *different* targets on purpose:
 //   - package.json#exports -> built `dist/*.js` (npm artifact)
-//   - jsr.json#exports      -> source `./mod.ts` (JSR publishes source)
+//   - jsr.json#exports      -> source `./index.ts` (JSR publishes source)
 //
 // The bare specifiers the source uses (`@panqueue/*`, `redis`) are mapped into
 // jsr.json#imports so JSR resolves siblings as `jsr:` and externals as `npm:`.
@@ -49,7 +49,7 @@ for (const { version, pkg, dir } of packages.values()) {
     name: pkg.name,
     version,
     license: pkg.license ?? "MIT",
-    exports: "./mod.ts",
+    exports: "./index.ts",
     ...(Object.keys(imports).length > 0 ? { imports } : {}),
     publish: {
       exclude: [
