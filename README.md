@@ -5,7 +5,7 @@
 <h1 align="center">Panqueue</h1>
 
 <p align="center">
-  <strong>Redis-backed job queue for Deno</strong><br>
+  <strong>Redis-backed job queue for Node, Bun, and Deno</strong><br>
   Type-safe queues with at-least-once delivery, lease-based recovery, and atomic Lua scripts.
 </p>
 
@@ -29,11 +29,30 @@ See [TODO.md](./TODO.md) for remaining work.
 
 | Package | Description |
 |---|---|
+| [`@panqueue/core`](./packages/core) | Shared types, key helpers, and serialization primitives |
 | [`@panqueue/config`](./packages/config) | Shared queue config (`definePanqueueConfig`) |
 | [`@panqueue/client`](./packages/client) | Producer — `createQueueClient` / `QueueClient` |
 | [`@panqueue/worker`](./packages/worker) | Consumer — `defineWorker` / `WorkerPool` |
 
-> `@panqueue/internal` is an implementation detail and not a public package.
+All packages are **ESM-only** and ship with first-class types.
+
+## Installation
+
+Panqueue is published to both **npm** and **JSR** from the same source.
+
+```sh
+# Node / Bun
+npm i @panqueue/client @panqueue/worker      # or: pnpm add … / bun add …
+
+# Deno (via npm)
+deno add npm:@panqueue/client npm:@panqueue/worker
+
+# Deno (via JSR)
+deno add jsr:@panqueue/client jsr:@panqueue/worker
+```
+
+`@panqueue/config` and `@panqueue/core` are pulled in automatically as
+dependencies. You also need a Redis server (7+).
 
 ## Quick start
 
@@ -155,39 +174,46 @@ Both modes return a `ShutdownResult`: `{ mode, timedOut, unfinishedJobs, requeue
 
 ## Compatibility
 
-- **Runtime:** Deno (JSR)
+- **Runtimes:** Node 22+, Bun, and Deno
+- **Registries:** npm (primary) and JSR
+- **Modules:** ESM only
 - **Redis:** 7+ (uses `HEXISTS`, `ZMSCORE`, and `TIME`)
 
 ## Workspace
 
+One TypeScript source tree, built for npm with [tsdown](https://tsdown.dev) and
+published unchanged to JSR. Tasks are orchestrated by [pnpm](https://pnpm.io)
+workspaces and releases by [Release Please](https://github.com/googleapis/release-please).
+
 ```
-packages/        Deno packages (JSR) — config, client, worker
-internal/        Shared internal package (not published)
-packages-node/   Node.js packages (pnpm)
+packages/        Published packages — core, config, client, worker
 apps/docs/       Documentation site (Waku + Fumadocs)
-demo/            Integration tests and demo scripts
+demo/            Demo scripts (Deno)
 benchmarks/      BullMQ comparison benchmarks
 ```
 
 ### Common commands
 
 ```sh
-deno task version:bump:dry-run   # Preview version bumps
-deno task publish:dry-run        # Preview JSR publish
-pnpm install                      # Install Node.js dependencies
-pnpm docs:dev                     # Dev server for docs site
-pnpm docs:typecheck               # Typecheck docs site
-pnpm docs:build                   # Build docs site
+pnpm install        # Install dependencies
+pnpm build          # Build every package with tsdown (ESM + .d.ts)
+pnpm typecheck      # Typecheck every package
+pnpm test           # Run the Vitest suite on Node
+pnpm smoke:bun      # Smoke-test the built artifacts on Bun
+pnpm smoke:deno     # Smoke-test the built artifacts on Deno
+pnpm docs:dev       # Dev server for the docs site
 ```
+
+pnpm runs these across the workspace in dependency order (`pnpm -r`).
 
 ### Demo
 
-The demo requires Redis on port 6399 (see `demo/docker-compose.yml`):
+The demo requires Redis (see `demo/docker-compose.yml`) and runs on Deno
+against the built packages (run `pnpm build` first):
 
 ```sh
-deno task -A demo:enqueue    # Enqueue sample jobs
-deno task -A demo:worker    # Process them
-deno task -A demo:test      # Run integration tests
+deno task --cwd demo enqueue   # Enqueue sample jobs
+deno task --cwd demo worker    # Process them
 ```
 
 ## Documentation

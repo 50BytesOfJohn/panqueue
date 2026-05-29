@@ -5,7 +5,7 @@
  */
 
 import { createClient } from "redis";
-import type { ConnectionOptions } from "@panqueue/internal";
+import type { ConnectionOptions } from "@panqueue/core";
 
 export type RawRedis = ReturnType<typeof createClient>;
 

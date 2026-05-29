@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+# Single in-flight release run; never cancel a publish midway.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Release PR / tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      # Per-package flags (manifest mode). The node-workspace plugin bumps
+      # dependents too, so a `core` release also releases config/client/worker,
+      # while a leaf like `worker` can be released on its own.
+      core: ${{ steps.release.outputs['packages/core--release_created'] }}
+      config: ${{ steps.release.outputs['packages/config--release_created'] }}
+      client: ${{ steps.release.outputs['packages/client--release_created'] }}
+      worker: ${{ steps.release.outputs['packages/worker--release_created'] }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    name: Publish to npm + JSR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    permissions:
+      contents: read
+      id-token: write # npm provenance + JSR OIDC
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        run: pnpm build
+
+      # pnpm publishes in dependency order (core before its dependents) and
+      # skips any package whose version is already on npm, so this safely
+      # publishes only the packages Release Please just bumped. Running through
+      # pnpm (not bare npm) rewrites `workspace:*` to concrete version ranges.
+      - name: Publish to npm (with provenance)
+        run: pnpm --filter "./packages/*" -r publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+
+      # JSR publishes source (not dist) and has no "skip if already published",
+      # so each package is published only when Release Please bumped it, in
+      # dependency order so a package's `jsr:@panqueue/*` siblings already exist.
+      # `jsr publish` authenticates via GitHub OIDC (needs id-token: write).
+      - name: Generate jsr.json from each package.json
+        run: pnpm gen:jsr
+
+      - name: Publish @panqueue/core to JSR
+        if: ${{ needs.release-please.outputs.core == 'true' }}
+        working-directory: packages/core
+        run: npx jsr publish --allow-dirty
+
+      - name: Publish @panqueue/config to JSR
+        if: ${{ needs.release-please.outputs.config == 'true' }}
+        working-directory: packages/config
+        run: npx jsr publish --allow-dirty
+
+      - name: Publish @panqueue/client to JSR
+        if: ${{ needs.release-please.outputs.client == 'true' }}
+        working-directory: packages/client
+        run: npx jsr publish --allow-dirty
+
+      - name: Publish @panqueue/worker to JSR
+        if: ${{ needs.release-please.outputs.worker == 'true' }}
+        working-directory: packages/worker
+        run: npx jsr publish --allow-dirty

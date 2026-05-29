@@ -1,0 +1,6 @@
+{
+  "packages/core": "0.0.1",
+  "packages/config": "0.0.1",
+  "packages/client": "0.0.1",
+  "packages/worker": "0.0.1"
+}

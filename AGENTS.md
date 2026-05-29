@@ -1,6 +1,7 @@
 # Panqueue
 
-Panqueue is a modern queue library, currently designed specifically for Deno
+Panqueue is a modern, runtime-agnostic queue library that ships first-class on
+Node, Bun, and Deno from one TypeScript source tree (published to npm and JSR).
 
 # Development
 

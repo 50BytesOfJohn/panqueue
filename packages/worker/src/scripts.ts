@@ -1,9 +1,9 @@
-import { CLAIM_GLOBAL_SCRIPT } from "./lua/claim_global.ts";
-import { COMPLETE_SCRIPT } from "./lua/complete.ts";
-import { EXTEND_LOCK_SCRIPT } from "./lua/extend_lock.ts";
-import { FAIL_SCRIPT } from "./lua/fail.ts";
-import { RECOVER_SCRIPT } from "./lua/recover.ts";
-import { REQUEUE_ACTIVE_SCRIPT } from "./lua/requeue_active.ts";
+import { CLAIM_GLOBAL_SCRIPT } from "./lua/claim-global.js";
+import { COMPLETE_SCRIPT } from "./lua/complete.js";
+import { EXTEND_LOCK_SCRIPT } from "./lua/extend-lock.js";
+import { FAIL_SCRIPT } from "./lua/fail.js";
+import { RECOVER_SCRIPT } from "./lua/recover.js";
+import { REQUEUE_ACTIVE_SCRIPT } from "./lua/requeue-active.js";
 
 export const WORKER_SCRIPTS = {
   claimGlobal: CLAIM_GLOBAL_SCRIPT,

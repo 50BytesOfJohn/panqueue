@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "separate-pull-requests": false,
+  "include-component-in-tag": true,
+  "plugins": ["node-workspace"],
+  "packages": {
+    "packages/core": { "component": "core" },
+    "packages/config": { "component": "config" },
+    "packages/client": { "component": "client" },
+    "packages/worker": { "component": "worker" }
+  }
+}

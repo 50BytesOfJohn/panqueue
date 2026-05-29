@@ -1,0 +1,32 @@
+{
+  "name": "@panqueue/worker",
+  "version": "0.0.1",
+  "description": "Worker pool and scheduler for processing panqueue jobs from Redis.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "dependencies": {
+    "@panqueue/config": "workspace:*",
+    "@panqueue/core": "workspace:*",
+    "redis": "^5"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --isolatedDeclarations false --declaration false"
+  }
+}

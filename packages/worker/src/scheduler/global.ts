@@ -1,13 +1,13 @@
-import type { JobData, JsonSerializable } from "@panqueue/internal";
+import type { JobData, JsonSerializable } from "@panqueue/core";
 import {
   activeKey,
   corruptDataKey,
   corruptKey,
   jobsKey,
   waitingKey,
-} from "@panqueue/internal";
-import type { PanqueueWorkerClient } from "../redis_connection.ts";
-import { BaseJobScheduler, type ClaimResult } from "./base.ts";
+} from "@panqueue/core";
+import type { PanqueueWorkerClient } from "../redis-connection.js";
+import { BaseJobScheduler, type ClaimResult } from "./base.js";
 
 /**
  * Global mode scheduler — claims jobs via RPOP from the waiting list.

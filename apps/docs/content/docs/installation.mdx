@@ -14,13 +14,24 @@ Panqueue is split into three public packages:
 
 ## Install packages
 
+Panqueue ships on both npm and JSR from the same source. Pick the install path
+for your runtime:
+
 ```sh
+# Node / Bun
+npm i @panqueue/config @panqueue/client @panqueue/worker
+
+# Deno (via npm)
+deno add npm:@panqueue/config npm:@panqueue/client npm:@panqueue/worker
+
+# Deno (via JSR)
 deno add jsr:@panqueue/config jsr:@panqueue/client jsr:@panqueue/worker
 ```
 
 For a producer-only service, install `@panqueue/config` and
 `@panqueue/client`. For a worker-only service, install `@panqueue/config` and
-`@panqueue/worker`.
+`@panqueue/worker`. The shared `@panqueue/core` package is pulled in
+automatically. All packages are ESM-only.
 
 ## Start Redis
 
@@ -41,7 +52,8 @@ const redisUrl = "redis://localhost:6379";
 
 | Requirement | Version |
 | --- | --- |
-| Runtime | Deno |
+| Runtime | Node 22+, Bun, or Deno |
+| Modules | ESM only |
 | Storage | Redis 7+ |
 | Payloads | JSON-serializable values |
 

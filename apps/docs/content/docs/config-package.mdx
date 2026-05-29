@@ -240,7 +240,7 @@ Larger projects can put the config in a shared internal package:
 .
 ├── packages
 │   └── queue-config
-│       └── mod.ts
+│       └── index.ts
 ├── apps
 │   ├── api
 │   └── worker
@@ -249,7 +249,7 @@ Larger projects can put the config in a shared internal package:
 
 Export only the config and the queue type from that package:
 
-```ts title="packages/queue-config/mod.ts"
+```ts title="packages/queue-config/index.ts"
 import { definePanqueueConfig } from "@panqueue/config";
 
 export type Queues = {
