@@ -69,8 +69,8 @@ export class Semaphore {
 
   /** Release a permit and wake the next waiter (FIFO). */
   release(): void {
-    if (this.#waiters.length > 0) {
-      const next = this.#waiters.shift()!;
+    const next = this.#waiters.shift();
+    if (next) {
       next.cleanup?.();
       next.resolve();
     } else {

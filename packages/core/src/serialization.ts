@@ -69,7 +69,7 @@ function _assertImpl(value: unknown, path: string): void {
     throw new TypeError(`${path} contains a class instance`);
   }
 
-  for (const key of Object.keys(value as Record<string, unknown>)) {
-    _assertImpl((value as Record<string, unknown>)[key], `${path}.${key}`);
+  for (const [key, child] of Object.entries(value)) {
+    _assertImpl(child, `${path}.${key}`);
   }
 }
