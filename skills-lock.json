@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "aaa-unit-tests": {
+      "source": "50BytesOfJohn/skills",
+      "sourceType": "github",
+      "skillPath": "skills/aaa-unit-tests/SKILL.md",
+      "computedHash": "4c46a78d49df8bc882accf13a538f074e060539608ff47f8c0da33e69fbeb58b"
+    },
     "improve-codebase-architecture": {
       "source": "mattpocock/skills",
       "sourceType": "github",
