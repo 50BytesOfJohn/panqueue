@@ -3,28 +3,28 @@
   "version": "0.0.1",
   "description": "Type-safe shared configuration for panqueue clients and workers.",
   "license": "MIT",
-  "type": "module",
-  "sideEffects": false,
-  "exports": {
-    ".": "./dist/index.js",
-    "./package.json": "./package.json"
-  },
-  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],
-  "engines": {
-    "node": ">=22"
+  "type": "module",
+  "sideEffects": false,
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
     "provenance": true
   },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json"
+  },
   "dependencies": {
     "@panqueue/core": "workspace:*"
   },
-  "scripts": {
-    "build": "tsdown",
-    "typecheck": "tsc -p tsconfig.json --isolatedDeclarations false --declaration false"
+  "engines": {
+    "node": ">=22"
   }
 }

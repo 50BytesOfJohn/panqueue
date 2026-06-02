@@ -1,4 +1,21 @@
-import { defineScript } from "redis";
+import { defineScript, type CommandParser } from "redis";
+
+import type { PanqueueRedisScript } from "./types.js";
+
+type FailScriptArguments = [
+  activeKey: string,
+  failedKey: string,
+  waitingKey: string,
+  jobsKey: string,
+  notifyKey: string,
+  corruptKey: string,
+  corruptDataKey: string,
+  jobId: string,
+  error: string,
+  lockToken: string,
+];
+
+export type FailScript = PanqueueRedisScript<FailScriptArguments>;
 
 /**
  * Lua script that atomically handles a job failure with retry support:
@@ -12,7 +29,7 @@ import { defineScript } from "redis";
  * Returns "waiting" (retried), "failed" (exhausted), "stale", "missing",
  * or "corrupt".
  */
-export const FAIL_SCRIPT = defineScript({
+export const FAIL_SCRIPT: FailScript = defineScript({
   NUMBER_OF_KEYS: 7,
   SCRIPT: `
 local raw = redis.call('HGET', KEYS[4], ARGV[1])
@@ -79,7 +96,7 @@ end
    * @param lockToken  - lock token held by the caller
    */
   parseCommand(
-    parser,
+    parser: CommandParser,
     activeKey: string,
     failedKey: string,
     waitingKey: string,
@@ -90,7 +107,7 @@ end
     jobId: string,
     error: string,
     lockToken: string,
-  ) {
+  ): void {
     parser.pushKeys([
       activeKey,
       failedKey,
@@ -102,7 +119,7 @@ end
     ]);
     parser.push(jobId, error, lockToken);
   },
-  transformReply(reply: unknown) {
+  transformReply(reply: unknown): unknown {
     return reply;
   },
 });

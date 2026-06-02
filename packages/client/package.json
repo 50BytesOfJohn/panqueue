@@ -3,30 +3,30 @@
   "version": "0.0.1",
   "description": "Type-safe producer client for enqueuing panqueue jobs into Redis.",
   "license": "MIT",
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "sideEffects": false,
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
     "./package.json": "./package.json"
   },
-  "types": "./dist/index.d.ts",
-  "files": [
-    "dist"
-  ],
-  "engines": {
-    "node": ">=22"
-  },
   "publishConfig": {
     "access": "public",
     "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@panqueue/config": "workspace:*",
     "@panqueue/core": "workspace:*",
     "redis": "^5"
   },
-  "scripts": {
-    "build": "tsdown",
-    "typecheck": "tsc -p tsconfig.json --isolatedDeclarations false --declaration false"
+  "engines": {
+    "node": ">=22"
   }
 }

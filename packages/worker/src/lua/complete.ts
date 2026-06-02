@@ -1,4 +1,18 @@
-import { defineScript } from "redis";
+import { defineScript, type CommandParser } from "redis";
+
+import type { PanqueueRedisScript } from "./types.js";
+
+type CompleteScriptArguments = [
+  activeKey: string,
+  completedKey: string,
+  jobsKey: string,
+  corruptKey: string,
+  corruptDataKey: string,
+  jobId: string,
+  lockToken: string,
+];
+
+export type CompleteScript = PanqueueRedisScript<CompleteScriptArguments>;
 
 /**
  * Lua script that atomically marks a job as completed:
@@ -10,7 +24,7 @@ import { defineScript } from "redis";
  *
  * Returns "completed", "stale", "missing", or "corrupt".
  */
-export const COMPLETE_SCRIPT = defineScript({
+export const COMPLETE_SCRIPT: CompleteScript = defineScript({
   NUMBER_OF_KEYS: 5,
   SCRIPT: `
 local raw = redis.call('HGET', KEYS[3], ARGV[1])
@@ -59,7 +73,7 @@ return 'completed'
    * @param lockToken    - the lock token held by the caller
    */
   parseCommand(
-    parser,
+    parser: CommandParser,
     activeKey: string,
     completedKey: string,
     jobsKey: string,
@@ -67,17 +81,11 @@ return 'completed'
     corruptDataKey: string,
     jobId: string,
     lockToken: string,
-  ) {
-    parser.pushKeys([
-      activeKey,
-      completedKey,
-      jobsKey,
-      corruptKey,
-      corruptDataKey,
-    ]);
+  ): void {
+    parser.pushKeys([activeKey, completedKey, jobsKey, corruptKey, corruptDataKey]);
     parser.push(jobId, lockToken);
   },
-  transformReply(reply: unknown) {
+  transformReply(reply: unknown): unknown {
     return reply;
   },
 });

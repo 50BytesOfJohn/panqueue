@@ -1,4 +1,20 @@
-import { defineScript } from "redis";
+import { defineScript, type CommandParser } from "redis";
+
+import type { PanqueueRedisScript } from "./types.js";
+
+type RecoverScriptArguments = [
+  activeKey: string,
+  waitingKey: string,
+  jobsKey: string,
+  notifyKey: string,
+  failedKey: string,
+  corruptKey: string,
+  corruptDataKey: string,
+  batchSize: string,
+  reason: string,
+];
+
+export type RecoverScript = PanqueueRedisScript<RecoverScriptArguments>;
 
 /**
  * Lua script that atomically recovers stalled jobs whose lease has expired.
@@ -19,7 +35,7 @@ import { defineScript } from "redis";
  * Concurrent sweeps by different workers are safe: only the first ZREM wins,
  * the others see no candidate left.
  */
-export const RECOVER_SCRIPT = defineScript({
+export const RECOVER_SCRIPT: RecoverScript = defineScript({
   NUMBER_OF_KEYS: 7,
   SCRIPT: `
 local t = redis.call('TIME')
@@ -88,7 +104,7 @@ return recovered
    * @param reason     - failedReason text written on the job hash
    */
   parseCommand(
-    parser,
+    parser: CommandParser,
     activeKey: string,
     waitingKey: string,
     jobsKey: string,
@@ -98,7 +114,7 @@ return recovered
     corruptDataKey: string,
     batchSize: string,
     reason: string,
-  ) {
+  ): void {
     parser.pushKeys([
       activeKey,
       waitingKey,
@@ -110,7 +126,7 @@ return recovered
     ]);
     parser.push(batchSize, reason);
   },
-  transformReply(reply: unknown) {
+  transformReply(reply: unknown): unknown {
     return reply;
   },
 });

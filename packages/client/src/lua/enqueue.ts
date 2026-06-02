@@ -1,4 +1,16 @@
-import { defineScript } from "redis";
+import { defineScript, type CommandParser } from "redis";
+
+import type { PanqueueRedisScript } from "./types.js";
+
+type EnqueueScriptArguments = [
+  jobsKey: string,
+  waitingKey: string,
+  notifyKey: string,
+  jobId: string,
+  serialized: string,
+];
+
+export type EnqueueScript = PanqueueRedisScript<EnqueueScriptArguments>;
 
 /**
  * Lua script that atomically enqueues a job:
@@ -9,7 +21,7 @@ import { defineScript } from "redis";
  *
  * Returns the job ID.
  */
-export const ENQUEUE_SCRIPT = defineScript({
+export const ENQUEUE_SCRIPT: EnqueueScript = defineScript({
   NUMBER_OF_KEYS: 3,
   SCRIPT: `
 local ok, decoded = pcall(cjson.decode, ARGV[2])
@@ -43,17 +55,17 @@ return ARGV[1]
    * @param serialized - serialized job data (JSON string)
    */
   parseCommand(
-    parser,
+    parser: CommandParser,
     jobsKey: string,
     waitingKey: string,
     notifyKey: string,
     jobId: string,
     serialized: string,
-  ) {
+  ): void {
     parser.pushKeys([jobsKey, waitingKey, notifyKey]);
     parser.push(jobId, serialized);
   },
-  transformReply(reply: unknown) {
+  transformReply(reply: unknown): unknown {
     return reply;
   },
 });

@@ -1,4 +1,20 @@
-import { defineScript } from "redis";
+import { defineScript, type CommandParser } from "redis";
+
+import type { PanqueueRedisScript } from "./types.js";
+
+type RequeueActiveScriptArguments = [
+  activeKey: string,
+  waitingKey: string,
+  jobsKey: string,
+  notifyKey: string,
+  corruptKey: string,
+  corruptDataKey: string,
+  jobId: string,
+  lockToken: string,
+  reason: string,
+];
+
+export type RequeueActiveScript = PanqueueRedisScript<RequeueActiveScriptArguments>;
 
 /**
  * Lua script used by force shutdown to atomically hand an in-flight job
@@ -14,7 +30,7 @@ import { defineScript } from "redis";
  *
  * Returns "waiting", "stale", "missing", or "corrupt".
  */
-export const REQUEUE_ACTIVE_SCRIPT = defineScript({
+export const REQUEUE_ACTIVE_SCRIPT: RequeueActiveScript = defineScript({
   NUMBER_OF_KEYS: 6,
   SCRIPT: `
 local raw = redis.call('HGET', KEYS[3], ARGV[1])
@@ -67,7 +83,7 @@ return 'waiting'
    * @param reason     - failedReason text written on the job hash
    */
   parseCommand(
-    parser,
+    parser: CommandParser,
     activeKey: string,
     waitingKey: string,
     jobsKey: string,
@@ -77,18 +93,11 @@ return 'waiting'
     jobId: string,
     lockToken: string,
     reason: string,
-  ) {
-    parser.pushKeys([
-      activeKey,
-      waitingKey,
-      jobsKey,
-      notifyKey,
-      corruptKey,
-      corruptDataKey,
-    ]);
+  ): void {
+    parser.pushKeys([activeKey, waitingKey, jobsKey, notifyKey, corruptKey, corruptDataKey]);
     parser.push(jobId, lockToken, reason);
   },
-  transformReply(reply: unknown) {
+  transformReply(reply: unknown): unknown {
     return reply;
   },
 });

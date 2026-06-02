@@ -1,4 +1,18 @@
-import { defineScript } from "redis";
+import { defineScript, type CommandParser } from "redis";
+
+import type { PanqueueRedisScript } from "./types.js";
+
+type ExtendLockScriptArguments = [
+  activeKey: string,
+  jobsKey: string,
+  corruptKey: string,
+  corruptDataKey: string,
+  jobId: string,
+  lockToken: string,
+  leaseMs: string,
+];
+
+export type ExtendLockScript = PanqueueRedisScript<ExtendLockScriptArguments>;
 
 /**
  * Lua script that atomically extends the lease deadline on an active job.
@@ -13,7 +27,7 @@ import { defineScript } from "redis";
  *
  * Returns "extended", "stale", "missing", or "corrupt".
  */
-export const EXTEND_LOCK_SCRIPT = defineScript({
+export const EXTEND_LOCK_SCRIPT: ExtendLockScript = defineScript({
   NUMBER_OF_KEYS: 4,
   SCRIPT: `
 local raw = redis.call('HGET', KEYS[2], ARGV[1])
@@ -65,7 +79,7 @@ return 'extended'
    * @param leaseMs     - lease duration in ms
    */
   parseCommand(
-    parser,
+    parser: CommandParser,
     activeKey: string,
     jobsKey: string,
     corruptKey: string,
@@ -73,11 +87,11 @@ return 'extended'
     jobId: string,
     lockToken: string,
     leaseMs: string,
-  ) {
+  ): void {
     parser.pushKeys([activeKey, jobsKey, corruptKey, corruptDataKey]);
     parser.push(jobId, lockToken, leaseMs);
   },
-  transformReply(reply: unknown) {
+  transformReply(reply: unknown): unknown {
     return reply;
   },
 });

@@ -1,4 +1,17 @@
-import { defineScript } from "redis";
+import { defineScript, type CommandParser } from "redis";
+
+import type { PanqueueRedisScript } from "./types.js";
+
+type ClaimGlobalScriptArguments = [
+  waitingKey: string,
+  activeKey: string,
+  jobsKey: string,
+  corruptKey: string,
+  corruptDataKey: string,
+  leaseMs: string,
+];
+
+export type ClaimGlobalScript = PanqueueRedisScript<ClaimGlobalScriptArguments>;
 
 /**
  * Lua script that atomically claims a job from the waiting list (global mode):
@@ -11,7 +24,7 @@ import { defineScript } from "redis";
  * Returns the updated job JSON string, or nil if the waiting list is empty.
  * Returns "corrupt:<jobId>" when the stored payload cannot be decoded.
  */
-export const CLAIM_GLOBAL_SCRIPT = defineScript({
+export const CLAIM_GLOBAL_SCRIPT: ClaimGlobalScript = defineScript({
   NUMBER_OF_KEYS: 5,
   SCRIPT: `
 local jobId = redis.call('RPOP', KEYS[1])
@@ -65,24 +78,18 @@ return updated
    * @param leaseMs    - lease duration in ms
    */
   parseCommand(
-    parser,
+    parser: CommandParser,
     waitingKey: string,
     activeKey: string,
     jobsKey: string,
     corruptKey: string,
     corruptDataKey: string,
     leaseMs: string,
-  ) {
-    parser.pushKeys([
-      waitingKey,
-      activeKey,
-      jobsKey,
-      corruptKey,
-      corruptDataKey,
-    ]);
+  ): void {
+    parser.pushKeys([waitingKey, activeKey, jobsKey, corruptKey, corruptDataKey]);
     parser.push(leaseMs);
   },
-  transformReply(reply: unknown) {
+  transformReply(reply: unknown): unknown {
     return reply;
   },
 });

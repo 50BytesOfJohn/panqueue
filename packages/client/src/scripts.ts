@@ -1,5 +1,11 @@
-import { ENQUEUE_SCRIPT } from "./lua/enqueue.js";
+import type { RedisScripts } from "redis";
 
-export const CLIENT_SCRIPTS = {
+import { ENQUEUE_SCRIPT, type EnqueueScript } from "./lua/enqueue.js";
+
+export interface ClientScripts extends RedisScripts {
+  enqueue: EnqueueScript;
+}
+
+export const CLIENT_SCRIPTS: ClientScripts = {
   enqueue: ENQUEUE_SCRIPT,
-} as const;
+};

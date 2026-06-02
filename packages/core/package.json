@@ -3,18 +3,15 @@
   "version": "0.0.1",
   "description": "Shared types, key helpers, and serialization primitives for panqueue.",
   "license": "MIT",
-  "type": "module",
-  "sideEffects": false,
-  "exports": {
-    ".": "./dist/index.js",
-    "./package.json": "./package.json"
-  },
-  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],
-  "engines": {
-    "node": ">=22"
+  "type": "module",
+  "sideEffects": false,
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
@@ -22,6 +19,9 @@
   },
   "scripts": {
     "build": "tsdown",
-    "typecheck": "tsc -p tsconfig.json --isolatedDeclarations false --declaration false"
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
