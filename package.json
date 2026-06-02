@@ -1,12 +1,12 @@
 {
   "name": "panqueue-workspace",
   "private": true,
-  "packageManager": "pnpm@10.14.0",
-  "engines": {
-    "node": ">=22"
-  },
   "scripts": {
     "build": "pnpm --filter \"./packages/*\" -r build",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
     "typecheck": "pnpm --filter \"./packages/*\" -r typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -21,9 +21,15 @@
     "@panqueue/config": "workspace:*",
     "@panqueue/core": "workspace:*",
     "@panqueue/worker": "workspace:*",
+    "oxfmt": "^0.53.0",
+    "oxlint": "^1.68.0",
     "publint": "^0.3.21",
     "tsdown": "^0.22.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"
-  }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.14.0"
 }

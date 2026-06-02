@@ -1,28 +1,26 @@
 {
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": [
-    "typescript",
-    "react",
-    "import"
-  ],
-  "categories": {},
-  "env": {
-    "builtin": true
+  "$schema": "../../node_modules/oxlint/configuration_schema.json",
+  "extends": ["../../.oxlintrc.json"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn",
+    "style": "off",
+    "pedantic": "off",
+    "restriction": "off",
+    "nursery": "off"
   },
-  "settings": {
-    "react": {
-      "version": "19.2.6"
-    },
-    "tailwindcss": {
-      "callees": [
-        "clsx",
-        "cva",
-        "cn"
-      ]
-    }
-  },
-  "ignorePatterns": [
-    "node_modules/",
-    "dist/"
-  ]
+  "rules": {
+    "jsx-a11y/click-events-have-key-events": "off",
+    "jsx-a11y/no-autofocus": "off",
+    "jsx-a11y/no-noninteractive-element-interactions": "off",
+    "jsx-a11y/no-static-element-interactions": "off",
+    "no-console": "off",
+    "no-unused-vars": "warn",
+    "react/react-in-jsx-scope": "off",
+    "typescript/consistent-type-imports": "off",
+    "typescript/explicit-module-boundary-types": "off",
+    "typescript/no-explicit-any": "warn",
+    "typescript/no-non-null-assertion": "warn"
+  }
 }

@@ -1,12 +1,13 @@
-import type { JobData, JsonSerializable } from "@panqueue/core";
 import {
   activeKey,
   corruptDataKey,
   corruptKey,
+  type JobData,
   jobsKey,
+  type JsonSerializable,
   waitingKey,
 } from "@panqueue/core";
-import type { PanqueueWorkerClient } from "../redis-connection.js";
+
 import { BaseJobScheduler, type ClaimResult } from "./base.js";
 
 /**
@@ -18,10 +19,6 @@ import { BaseJobScheduler, type ClaimResult } from "./base.js";
 export class GlobalJobScheduler<
   T extends JsonSerializable = JsonSerializable,
 > extends BaseJobScheduler<T> {
-  constructor(queueId: string, client: PanqueueWorkerClient) {
-    super(queueId, client);
-  }
-
   /** Claim the next job from the waiting list using an atomic Lua script. */
   async claim(leaseMs: number): Promise<ClaimResult<T>> {
     const result = await this.client.claimGlobal(
@@ -57,9 +54,7 @@ function assertJobData<T extends JsonSerializable>(value: unknown): JobData<T> {
   return value;
 }
 
-function isClaimedJobData<T extends JsonSerializable>(
-  value: unknown,
-): value is JobData<T> {
+function isClaimedJobData<T extends JsonSerializable>(value: unknown): value is JobData<T> {
   return (
     typeof value === "object" &&
     value !== null &&

@@ -52,19 +52,11 @@ for (const { version, pkg, dir } of packages.values()) {
     exports: "./index.ts",
     ...(Object.keys(imports).length > 0 ? { imports } : {}),
     publish: {
-      exclude: [
-        "tsconfig.json",
-        "tsdown.config.ts",
-        "dist",
-        "node_modules",
-      ],
+      exclude: ["tsconfig.json", "tsdown.config.ts", "dist", "node_modules"],
     },
   };
 
-  await writeFile(
-    new URL("jsr.json", dir),
-    JSON.stringify(jsr, null, 2) + "\n",
-  );
+  await writeFile(new URL("jsr.json", dir), JSON.stringify(jsr, null, 2) + "\n");
   generated.push(`${pkg.name}@${version}`);
 }
 

@@ -16,9 +16,7 @@ const pq = definePanqueueConfig<DemoQueues>({
 
 const emailsWorker = defineWorker(pq, "emails", async (job) => {
   console.log(
-    `[${
-      new Date().toISOString()
-    }] Processing email to ${job.data.to}: "${job.data.subject}"`,
+    `[${new Date().toISOString()}] Processing email to ${job.data.to}: "${job.data.subject}"`,
   );
   console.log(`  Simulating work for 5 seconds...`);
   await new Promise((resolve) => setTimeout(resolve, 5000));

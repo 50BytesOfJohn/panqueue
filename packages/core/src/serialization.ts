@@ -20,9 +20,7 @@ function _assertImpl(value: unknown, path: string): void {
       return;
     case "number":
       if (!Number.isFinite(value)) {
-        throw new TypeError(
-          `${path} contains a non-finite number (NaN or Infinity)`,
-        );
+        throw new TypeError(`${path} contains a non-finite number (NaN or Infinity)`);
       }
       return;
     case "undefined":
@@ -47,9 +45,7 @@ function _assertImpl(value: unknown, path: string): void {
   }
 
   if (value instanceof Map || value instanceof Set) {
-    throw new TypeError(
-      `${path} contains a ${value instanceof Map ? "Map" : "Set"} instance`,
-    );
+    throw new TypeError(`${path} contains a ${value instanceof Map ? "Map" : "Set"} instance`);
   }
 
   if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {

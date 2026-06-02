@@ -25,12 +25,7 @@ export type JsonSerializable =
 export type QueueMap = Record<string, JsonSerializable>;
 
 /** Status of a job in the queue lifecycle. */
-export type JobStatus =
-  | "waiting"
-  | "delayed"
-  | "active"
-  | "completed"
-  | "failed";
+export type JobStatus = "waiting" | "delayed" | "active" | "completed" | "failed";
 
 /** Per-job options provided at enqueue time. */
 export interface JobOptions {
@@ -121,9 +116,9 @@ export type ConnectionOptions =
   | string
   | { url: string }
   | {
-    host?: string;
-    port?: number;
-    password?: string;
-    db?: number;
-    tls?: boolean;
-  };
+      host?: string;
+      port?: number;
+      password?: string;
+      db?: number;
+      tls?: boolean;
+    };

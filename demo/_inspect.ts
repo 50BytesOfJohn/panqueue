@@ -4,8 +4,8 @@
  * narrows away raw Redis access so it does not leak into the library surface.
  */
 
-import { createClient } from "redis";
 import type { ConnectionOptions } from "@panqueue/core";
+import { createClient } from "redis";
 
 export type RawRedis = ReturnType<typeof createClient>;
 
@@ -23,9 +23,7 @@ function asClientOptions(options: ConnectionOptions) {
 }
 
 /** Open a connected raw Redis client. Caller is responsible for disconnect. */
-export async function openInspector(
-  options: ConnectionOptions,
-): Promise<RawRedis> {
+export async function openInspector(options: ConnectionOptions): Promise<RawRedis> {
   const client = createClient(asClientOptions(options));
   await client.connect();
   return client;

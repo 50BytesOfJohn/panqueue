@@ -6,11 +6,11 @@ icon: Package
 
 Panqueue is split into three public packages:
 
-| Package | Use it for |
-| --- | --- |
+| Package            | Use it for                                 |
+| ------------------ | ------------------------------------------ |
 | `@panqueue/config` | Shared queue definitions and payload types |
-| `@panqueue/client` | Producers that enqueue jobs |
-| `@panqueue/worker` | Workers that process jobs |
+| `@panqueue/client` | Producers that enqueue jobs                |
+| `@panqueue/worker` | Workers that process jobs                  |
 
 ## Install packages
 
@@ -50,14 +50,14 @@ const redisUrl = "redis://localhost:6379";
 
 ## Runtime requirements
 
-| Requirement | Version |
-| --- | --- |
-| Runtime | Node 22+, Bun, or Deno |
-| Modules | ESM only |
-| Storage | Redis 7+ |
-| Payloads | JSON-serializable values |
+| Requirement | Version                  |
+| ----------- | ------------------------ |
+| Runtime     | Node 22+, Bun, or Deno   |
+| Modules     | ESM only                 |
+| Storage     | Redis 7+                 |
+| Payloads    | JSON-serializable values |
 
 <Callout title="Connection ownership">
-  Panqueue owns Redis clients internally. Pass Redis connection configuration to
-  the client and worker pool instead of creating Redis clients yourself.
+  Panqueue owns Redis clients internally. Pass Redis connection configuration to the client and
+  worker pool instead of creating Redis clients yourself.
 </Callout>

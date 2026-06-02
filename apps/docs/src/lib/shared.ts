@@ -1,7 +1,7 @@
-export const appName = 'panqueue';
-export const docsRoute = '/docs';
-export const docsImageRoute = '/og/docs';
-export const docsContentRoute = '/llms.mdx/docs';
+export const appName = "panqueue";
+export const docsRoute = "/docs";
+export const docsImageRoute = "/og/docs";
+export const docsContentRoute = "/llms.mdx/docs";
 
 export const siteOrigin = process.env.VERCEL_PROJECT_PRODUCTION_URL
   ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
@@ -16,7 +16,7 @@ export function absoluteUrl(path: string) {
 }
 
 export const gitConfig = {
-  user: '50BytesOfJohn',
-  repo: 'panqueue',
-  branch: 'main',
+  user: "50BytesOfJohn",
+  repo: "panqueue",
+  branch: "main",
 };

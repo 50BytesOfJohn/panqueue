@@ -67,17 +67,18 @@ worker options, but it does not start processing by itself.
 import { defineWorker } from "@panqueue/worker";
 import { pq } from "../panqueue.config.ts";
 
-export const emailWorker = defineWorker(pq, "email", async (job) => {
-  await sendEmail(job.data);
-}, {
-  concurrency: 5,
-});
+export const emailWorker = defineWorker(
+  pq,
+  "email",
+  async (job) => {
+    await sendEmail(job.data);
+  },
+  {
+    concurrency: 5,
+  },
+);
 
-async function sendEmail(message: {
-  to: string;
-  subject: string;
-  body: string;
-}) {
+async function sendEmail(message: { to: string; subject: string; body: string }) {
   console.log(`sending "${message.subject}" to ${message.to}`);
 }
 ```

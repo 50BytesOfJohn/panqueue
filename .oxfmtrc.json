@@ -1,0 +1,61 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "useTabs": false,
+  "semi": true,
+  "singleQuote": false,
+  "trailingComma": "all",
+  "endOfLine": "lf",
+  "insertFinalNewline": true,
+  "proseWrap": "preserve",
+  "sortImports": true,
+  "sortPackageJson": true,
+  "ignorePatterns": [
+    ".agents/**",
+    "node_modules/**",
+    "dist/**",
+    "coverage/**",
+    ".turbo/**",
+    ".vercel/**",
+    "apps/**/dist/**",
+    "packages/**/dist/**",
+    "benchmarks/**",
+    "benchmarks/**/package-lock.json"
+  ],
+  "overrides": [
+    {
+      "files": ["packages/**/*.{ts,tsx,mts,cts}"],
+      "options": {
+        "sortImports": {
+          "customGroups": [
+            {
+              "groupName": "redis",
+              "elementNamePattern": ["redis"],
+              "selector": "external"
+            }
+          ],
+          "groups": [
+            "builtin",
+            "redis",
+            "external",
+            ["internal", "subpath"],
+            ["parent", "sibling", "index"],
+            "style",
+            "unknown"
+          ],
+          "internalPattern": ["@panqueue/**"],
+          "newlinesBetween": true
+        }
+      }
+    },
+    {
+      "files": ["apps/docs/**/*.{ts,tsx,md,mdx,css}"],
+      "options": {
+        "sortTailwindcss": {
+          "stylesheet": "apps/docs/src/styles/globals.css"
+        }
+      }
+    }
+  ]
+}

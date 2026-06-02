@@ -1,6 +1,6 @@
-'use client';
-import { useState } from 'react';
-import { Check, Copy } from 'lucide-react';
+"use client";
+import { Check, Copy } from "lucide-react";
+import { useState } from "react";
 
 interface CopyButtonProps {
   text: string;
@@ -18,7 +18,7 @@ export function CopyButton({ text }: CopyButtonProps) {
   return (
     <button
       onClick={handleCopy}
-      className="ml-auto flex-shrink-0 p-1.5 rounded text-amber-500/60 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+      className="ml-auto flex-shrink-0 rounded p-1.5 text-amber-500/60 transition-colors hover:bg-amber-500/10 hover:text-amber-400"
       aria-label="Copy to clipboard"
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}

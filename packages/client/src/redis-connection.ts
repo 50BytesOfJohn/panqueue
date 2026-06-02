@@ -1,5 +1,7 @@
 import { createClient, type RedisClientOptions } from "redis";
+
 import type { ConnectionOptions } from "@panqueue/core";
+
 import { CLIENT_SCRIPTS } from "./scripts.js";
 
 /**
@@ -32,14 +34,14 @@ function buildClientOptions(options: ConnectionOptions): RedisClientOptions {
     database: options.db,
     socket: options.tls
       ? {
-        host: options.host ?? "localhost",
-        port: options.port ?? 6379,
-        tls: true,
-      }
+          host: options.host ?? "localhost",
+          port: options.port ?? 6379,
+          tls: true,
+        }
       : {
-        host: options.host ?? "localhost",
-        port: options.port ?? 6379,
-      },
+          host: options.host ?? "localhost",
+          port: options.port ?? 6379,
+        },
   } satisfies RedisClientOptions;
 }
 
@@ -94,9 +96,7 @@ export class RedisConnection {
   /** The underlying Redis client. Throws if not connected. */
   get client(): PanqueueProducerClient {
     if (!this.#client) {
-      throw new Error(
-        "[panqueue] Redis client is not connected. Call connect() first.",
-      );
+      throw new Error("[panqueue] Redis client is not connected. Call connect() first.");
     }
     return this.#client;
   }

@@ -167,11 +167,16 @@ lifecycle.
 
 ```ts
 // workers/email.ts
-export const emailWorker = defineWorker(pq, "email", async (job) => {
-  // job.data typed from shared config
-}, {
-  concurrency: 10,
-});
+export const emailWorker = defineWorker(
+  pq,
+  "email",
+  async (job) => {
+    // job.data typed from shared config
+  },
+  {
+    concurrency: 10,
+  },
+);
 ```
 
 `WorkerPool` owns start/shutdown and the Redis instances needed by all
@@ -180,11 +185,7 @@ registered worker definitions.
 ```ts
 const pool = new WorkerPool(pq);
 
-pool.register([
-  emailWorker,
-  imageWorker,
-  billingWorker,
-]);
+pool.register([emailWorker, imageWorker, billingWorker]);
 
 await pool.start();
 await pool.shutdown();

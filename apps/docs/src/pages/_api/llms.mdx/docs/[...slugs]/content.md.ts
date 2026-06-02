@@ -1,10 +1,11 @@
-import { getLLMText, source } from '@/lib/source';
-import { ApiContext } from 'waku/router';
-import { unstable_notFound } from 'waku/router/server';
+import { ApiContext } from "waku/router";
+import { unstable_notFound } from "waku/router/server";
+
+import { getLLMText, source } from "@/lib/source";
 
 export async function GET(
   _: Request,
-  { params }: ApiContext<'/llms.mdx/docs/[...slugs]/content.md'>,
+  { params }: ApiContext<"/llms.mdx/docs/[...slugs]/content.md">,
 ) {
   const slugs = params.slugs;
   const page = source.getPage(slugs);
@@ -12,7 +13,7 @@ export async function GET(
 
   return new Response(await getLLMText(page), {
     headers: {
-      'Content-Type': 'text/markdown',
+      "Content-Type": "text/markdown",
     },
   });
 }
@@ -23,7 +24,7 @@ export async function getConfig() {
     .map((item) => (item.lang ? [item.lang, ...item.slug] : item.slug));
 
   return {
-    render: 'static' as const,
+    render: "static" as const,
     staticPaths: pages,
   } as const;
 }

@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jobsKey, notifyKey, waitingKey } from "@panqueue/core";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import { createQueueClient, QueueClient } from "./queue-client.js";
 import { RedisConnection } from "./redis-connection.js";
 
@@ -23,8 +24,7 @@ type TestQueues = {
   emails: { to: string; subject: string };
 };
 
-const makeClient = () =>
-  new QueueClient<TestQueues>({ connection: "redis://localhost:6379" });
+const makeClient = () => new QueueClient<TestQueues>({ connection: "redis://localhost:6379" });
 
 /** The serialized JobData sent to Redis by the most recent enqueue call. */
 const lastSentJob = () => JSON.parse(enqueueMock.mock.calls[0][4]);
@@ -97,9 +97,13 @@ describe("QueueClient.enqueue", () => {
     const client = makeClient();
 
     // Act
-    await client.enqueue("emails", { to: "a@b.com", subject: "Hi" }, {
-      retries: 3,
-    });
+    await client.enqueue(
+      "emails",
+      { to: "a@b.com", subject: "Hi" },
+      {
+        retries: 3,
+      },
+    );
 
     // Assert
     expect(lastSentJob().maxRetries).toBe(3);
@@ -110,9 +114,13 @@ describe("QueueClient.enqueue", () => {
     const client = makeClient();
 
     // Act
-    await client.enqueue("emails", { to: "a@b.com", subject: "Hi" }, {
-      maxStalls: 9,
-    });
+    await client.enqueue(
+      "emails",
+      { to: "a@b.com", subject: "Hi" },
+      {
+        maxStalls: 9,
+      },
+    );
 
     // Assert
     expect(lastSentJob().maxStalls).toBe(9);

@@ -52,6 +52,7 @@ file, then import that file from producers and workers.
       },
     });
     ```
+
   </Step>
 
   <Step>
@@ -78,6 +79,7 @@ file, then import that file from producers and workers.
       await sendEmail(job.data);
     });
     ```
+
   </Step>
 </Steps>
 
@@ -115,8 +117,8 @@ Avoid `Date`, `Map`, `Set`, functions, class instances, and binary values in
 payloads. Serialize them into plain JSON values before enqueueing.
 
 <Callout type="info" title="Types flow from the config">
-  If you enqueue to `resizeImage`, TypeScript expects the `resizeImage` payload.
-  If you define a worker for `email`, `job.data` is the `email` payload.
+  If you enqueue to `resizeImage`, TypeScript expects the `resizeImage` payload. If you define a
+  worker for `email`, `job.data` is the `email` payload.
 </Callout>
 
 ## Redis connection
@@ -205,18 +207,23 @@ export const pq = definePanqueueConfig<Queues>({
 });
 ```
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
+| Option              | Type       | Default      | Description                                      |
+| ------------------- | ---------- | ------------ | ------------------------------------------------ |
 | `concurrency.scope` | `"global"` | Global scope | Applies queue concurrency as a queue-wide limit. |
 
 Worker-level concurrency still belongs on `defineWorker`:
 
 ```ts
-const emailWorker = defineWorker(pq, "email", async (job) => {
-  await sendEmail(job.data);
-}, {
-  concurrency: 5,
-});
+const emailWorker = defineWorker(
+  pq,
+  "email",
+  async (job) => {
+    await sendEmail(job.data);
+  },
+  {
+    concurrency: 5,
+  },
+);
 ```
 
 Use the config for shared queue shape and queue-level settings. Use worker
@@ -267,8 +274,8 @@ export const pq = definePanqueueConfig<Queues>({
 ```
 
 <Callout type="warn" title="Keep config import-safe">
-  The config file should define values, not start workers or enqueue jobs. That
-  keeps imports safe in producer processes, worker processes, tests, and scripts.
+  The config file should define values, not start workers or enqueue jobs. That keeps imports safe
+  in producer processes, worker processes, tests, and scripts.
 </Callout>
 
 ## API reference
@@ -279,11 +286,11 @@ function definePanqueueConfig<TQueues extends QueueMap>(
 ): PanqueueConfig<TQueues>;
 ```
 
-| Export | Kind | Description |
-| --- | --- | --- |
-| `definePanqueueConfig` | Function | Defines a typed Panqueue config and returns it unchanged. |
-| `PanqueueConfig<TQueues>` | Type | Shared config object with `redis` and `queues`. |
-| `QueueConfig` | Type | Per-queue settings inside `queues`. |
+| Export                    | Kind     | Description                                               |
+| ------------------------- | -------- | --------------------------------------------------------- |
+| `definePanqueueConfig`    | Function | Defines a typed Panqueue config and returns it unchanged. |
+| `PanqueueConfig<TQueues>` | Type     | Shared config object with `redis` and `queues`.           |
+| `QueueConfig`             | Type     | Per-queue settings inside `queues`.                       |
 
 ```ts
 interface PanqueueConfig<TQueues extends QueueMap> {

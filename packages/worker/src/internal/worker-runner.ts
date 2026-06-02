@@ -1,4 +1,5 @@
 import type { JobData } from "@panqueue/core";
+
 import type {
   Processor,
   WorkerDefinitionOptions,
@@ -6,8 +7,8 @@ import type {
   WorkerState,
 } from "../define-worker.js";
 import type { PanqueueWorkerClient } from "../redis-connection.js";
-import { GlobalJobScheduler } from "../scheduler/global.js";
 import type { BaseJobScheduler } from "../scheduler/base.js";
+import { GlobalJobScheduler } from "../scheduler/global.js";
 import { Semaphore } from "../semaphore.js";
 import { LeaseRenewer, type LeaseRenewal } from "./lease-renewer.js";
 import { StalledRecoverySweep } from "./stalled-recovery-sweep.js";
@@ -68,8 +69,7 @@ export class WorkerRunner {
     this.#concurrency = options.concurrency ?? 1;
     this.#pollInterval = options.pollInterval ?? 5000;
     this.#leaseMs = options.leaseMs ?? 30_000;
-    this.#lockRenewMs = options.lockRenewMs ??
-      Math.max(1, Math.floor(this.#leaseMs / 3));
+    this.#lockRenewMs = options.lockRenewMs ?? Math.max(1, Math.floor(this.#leaseMs / 3));
     this.#recoverIntervalMs = options.recoverIntervalMs ?? 30_000;
     this.#recoverBatchSize = options.recoverBatchSize ?? 100;
     this.#events = options.events ?? {};
@@ -153,14 +153,14 @@ export class WorkerRunner {
     for (const entry of stillRunning) {
       try {
         entry.stopRenewer();
-      } catch { /* swallow */ }
+      } catch {
+        /* swallow */
+      }
     }
 
     let requeued = 0;
     const results = await Promise.allSettled(
-      stillRunning.map((e) =>
-        this.#scheduler.requeueActive(e.jobId, e.lockToken, reason)
-      ),
+      stillRunning.map((e) => this.#scheduler.requeueActive(e.jobId, e.lockToken, reason)),
     );
     for (let i = 0; i < results.length; i++) {
       const r = results[i];
@@ -182,9 +182,7 @@ export class WorkerRunner {
   async drainInflight(timeoutMs?: number): Promise<DrainResult> {
     if (this.#inFlight.size === 0) return { timedOut: false };
 
-    const drainPromise = Promise.allSettled(
-      [...this.#inFlight].map((e) => e.promise),
-    );
+    const drainPromise = Promise.allSettled([...this.#inFlight].map((e) => e.promise));
 
     if (timeoutMs === undefined) {
       await drainPromise;
@@ -261,10 +259,7 @@ export class WorkerRunner {
     }
   }
 
-  async #processJob(
-    jobData: JobData,
-    renewer: LeaseRenewal,
-  ): Promise<void> {
+  async #processJob(jobData: JobData, renewer: LeaseRenewal): Promise<void> {
     this.#emitJobStart(jobData);
 
     const lockToken = jobData.lockToken ?? "";
@@ -288,7 +283,9 @@ export class WorkerRunner {
         if (result === "stale") {
           try {
             this.#events.onJobStale?.(jobData, "complete");
-          } catch { /* swallow */ }
+          } catch {
+            /* swallow */
+          }
           return;
         }
         if (result === "corrupt") {
@@ -305,9 +302,7 @@ export class WorkerRunner {
       }
     }
 
-    const message = handlerError instanceof Error
-      ? handlerError.message
-      : String(handlerError);
+    const message = handlerError instanceof Error ? handlerError.message : String(handlerError);
     try {
       const result = await this.#scheduler.fail(jobData.id, message, lockToken);
       if (result === "waiting") {
@@ -321,7 +316,9 @@ export class WorkerRunner {
       if (result === "stale") {
         try {
           this.#events.onJobStale?.(jobData, "fail");
-        } catch { /* swallow */ }
+        } catch {
+          /* swallow */
+        }
         return;
       }
       if (result === "corrupt") {
@@ -357,14 +354,18 @@ export class WorkerRunner {
     this.#state = to;
     try {
       this.#events.onStateChange?.(from, to);
-    } catch { /* swallow */ }
+    } catch {
+      /* swallow */
+    }
   }
 
   #emitError(context: string, error: unknown): void {
     if (this.#events.onError) {
       try {
         this.#events.onError(context, error);
-      } catch { /* swallow */ }
+      } catch {
+        /* swallow */
+      }
     } else {
       console.error(`[panqueue] ${context}:`, error);
     }
@@ -373,50 +374,60 @@ export class WorkerRunner {
   #emitJobStart(job: JobData): void {
     try {
       this.#events.onJobStart?.(job);
-    } catch { /* swallow */ }
+    } catch {
+      /* swallow */
+    }
   }
 
   #emitJobComplete(job: JobData): void {
     try {
       this.#events.onJobComplete?.(job);
-    } catch { /* swallow */ }
+    } catch {
+      /* swallow */
+    }
   }
 
   #emitJobFail(job: JobData, error: string): void {
     try {
       this.#events.onJobFail?.(job, error);
-    } catch { /* swallow */ }
+    } catch {
+      /* swallow */
+    }
   }
 
   #emitJobRetry(job: JobData, error: string): void {
     try {
       this.#events.onJobRetry?.(job, error);
-    } catch { /* swallow */ }
+    } catch {
+      /* swallow */
+    }
   }
 
   #emitJobRecovered(jobIds: string[]): void {
     try {
       this.#events.onJobRecovered?.(jobIds);
-    } catch { /* swallow */ }
+    } catch {
+      /* swallow */
+    }
   }
 
   #emitJobCorrupt(jobId: string, reason: string): void {
     if (this.#events.onJobCorrupt) {
       try {
         this.#events.onJobCorrupt(jobId, reason);
-      } catch { /* swallow */ }
+      } catch {
+        /* swallow */
+      }
       return;
     }
     this.#emitError(`corrupt:${jobId}`, new Error(reason));
   }
 
-  #emitJobAckError(
-    job: JobData,
-    phase: "complete" | "fail",
-    error: unknown,
-  ): void {
+  #emitJobAckError(job: JobData, phase: "complete" | "fail", error: unknown): void {
     try {
       this.#events.onJobAckError?.(job, phase, error);
-    } catch { /* swallow */ }
+    } catch {
+      /* swallow */
+    }
   }
 }

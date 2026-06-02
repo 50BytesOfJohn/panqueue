@@ -1,4 +1,5 @@
 import { QueueClient } from "@panqueue/client";
+
 import { withInspector } from "./_inspect.ts";
 
 type DemoQueues = {

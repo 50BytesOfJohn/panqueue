@@ -1,6 +1,8 @@
-import type { ReactNode } from 'react';
-import { Provider } from '@/components/provider';
-import '@/styles/globals.css';
+import type { ReactNode } from "react";
+
+import { Provider } from "@/components/provider";
+
+import "@/styles/globals.css";
 
 export default async function RootElement({ children }: { children: ReactNode }) {
   return (
@@ -12,7 +14,7 @@ export default async function RootElement({ children }: { children: ReactNode })
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="manifest" href="/site.webmanifest" />
       </head>
-      <body data-version="1.0" className="flex flex-col min-h-screen">
+      <body data-version="1.0" className="flex min-h-screen flex-col">
         <Provider>{children}</Provider>
       </body>
     </html>
@@ -21,6 +23,6 @@ export default async function RootElement({ children }: { children: ReactNode })
 
 export async function getConfig() {
   return {
-    render: 'static',
+    render: "static",
   } as const;
 }

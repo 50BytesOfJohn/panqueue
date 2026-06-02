@@ -1,5 +1,7 @@
 import { createClient, type RedisClientOptions } from "redis";
+
 import type { ConnectionOptions } from "@panqueue/core";
+
 import { WORKER_SCRIPTS } from "./scripts.js";
 
 /**
@@ -8,10 +10,7 @@ import { WORKER_SCRIPTS } from "./scripts.js";
  */
 export interface PanqueueSubscriber {
   disconnect(): Promise<void>;
-  subscribe(
-    channel: string,
-    listener: (message: string) => void,
-  ): Promise<void>;
+  subscribe(channel: string, listener: (message: string) => void): Promise<void>;
   unsubscribe(channel: string | string[]): Promise<void>;
 }
 
@@ -97,14 +96,14 @@ function buildClientOptions(options: ConnectionOptions): RedisClientOptions {
     database: options.db,
     socket: options.tls
       ? {
-        host: options.host ?? "localhost",
-        port: options.port ?? 6379,
-        tls: true,
-      }
+          host: options.host ?? "localhost",
+          port: options.port ?? 6379,
+          tls: true,
+        }
       : {
-        host: options.host ?? "localhost",
-        port: options.port ?? 6379,
-      },
+          host: options.host ?? "localhost",
+          port: options.port ?? 6379,
+        },
   } satisfies RedisClientOptions;
 }
 
@@ -161,9 +160,7 @@ export class RedisConnection {
   /** The command-mode client. Throws if not connected. */
   get client(): PanqueueWorkerClient {
     if (!this.#client) {
-      throw new Error(
-        "[panqueue] Redis client is not connected. Call connect() first.",
-      );
+      throw new Error("[panqueue] Redis client is not connected. Call connect() first.");
     }
     return this.#client;
   }
@@ -217,9 +214,7 @@ export class RedisSubscriberConnection {
   /** The subscriber-mode client. Throws if not connected. */
   get client(): PanqueueSubscriber {
     if (!this.#client) {
-      throw new Error(
-        "[panqueue] Redis subscriber is not connected. Call connect() first.",
-      );
+      throw new Error("[panqueue] Redis subscriber is not connected. Call connect() first.");
     }
     return this.#client;
   }

@@ -27,12 +27,12 @@ See [TODO.md](./TODO.md) for remaining work.
 
 ## Packages
 
-| Package | Description |
-|---|---|
-| [`@panqueue/core`](./packages/core) | Shared types, key helpers, and serialization primitives |
-| [`@panqueue/config`](./packages/config) | Shared queue config (`definePanqueueConfig`) |
-| [`@panqueue/client`](./packages/client) | Producer — `createQueueClient` / `QueueClient` |
-| [`@panqueue/worker`](./packages/worker) | Consumer — `defineWorker` / `WorkerPool` |
+| Package                                 | Description                                             |
+| --------------------------------------- | ------------------------------------------------------- |
+| [`@panqueue/core`](./packages/core)     | Shared types, key helpers, and serialization primitives |
+| [`@panqueue/config`](./packages/config) | Shared queue config (`definePanqueueConfig`)            |
+| [`@panqueue/client`](./packages/client) | Producer — `createQueueClient` / `QueueClient`          |
+| [`@panqueue/worker`](./packages/worker) | Consumer — `defineWorker` / `WorkerPool`                |
 
 All packages are **ESM-only** and ship with first-class types.
 
@@ -89,15 +89,24 @@ await client.disconnect();
 ```ts
 import { defineWorker, WorkerPool } from "@panqueue/worker";
 
-const emailWorker = defineWorker(config, "email", async (job) => {
-  await sendEmail(job.data);
-}, {
-  concurrency: 5,
-  events: {
-    onJobComplete(job) { console.log(`sent ${job.data.subject}`); },
-    onJobFail(job, error) { console.error(`failed: ${error}`); },
+const emailWorker = defineWorker(
+  config,
+  "email",
+  async (job) => {
+    await sendEmail(job.data);
   },
-});
+  {
+    concurrency: 5,
+    events: {
+      onJobComplete(job) {
+        console.log(`sent ${job.data.subject}`);
+      },
+      onJobFail(job, error) {
+        console.error(`failed: ${error}`);
+      },
+    },
+  },
+);
 
 const pool = new WorkerPool(config, { workers: [emailWorker] });
 await pool.start();
@@ -126,15 +135,15 @@ Panqueue owns all Redis connections internally. Pass connection config, not a Re
 
 ## Worker options
 
-| Option | Default | Description |
-|---|---|---|
-| `concurrency` | `1` | Max parallel jobs per queue |
-| `pollInterval` | `5000` | Fallback polling interval (ms) |
-| `leaseMs` | `30000` | Job lease duration (ms) |
-| `lockRenewMs` | `leaseMs / 3` | Lock renewal interval (ms) |
-| `recoverIntervalMs` | `30000` | Stalled-job recovery sweep interval (ms) |
-| `recoverBatchSize` | `100` | Max jobs per recovery sweep |
-| `events` | — | Observability callbacks (see below) |
+| Option              | Default       | Description                              |
+| ------------------- | ------------- | ---------------------------------------- |
+| `concurrency`       | `1`           | Max parallel jobs per queue              |
+| `pollInterval`      | `5000`        | Fallback polling interval (ms)           |
+| `leaseMs`           | `30000`       | Job lease duration (ms)                  |
+| `lockRenewMs`       | `leaseMs / 3` | Lock renewal interval (ms)               |
+| `recoverIntervalMs` | `30000`       | Stalled-job recovery sweep interval (ms) |
+| `recoverBatchSize`  | `100`         | Max jobs per recovery sweep              |
+| `events`            | —             | Observability callbacks (see below)      |
 
 ### Event handlers
 
@@ -165,10 +174,10 @@ Each job tracks three independent counters: `runs` (claims), `failures` (handler
 
 ## Shutdown semantics
 
-| Mode | Behaviour |
-|---|---|
+| Mode                | Behaviour                                                                                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Force** (default) | Stop claiming → atomically requeue every in-flight job → disconnect. Local handlers continue running but their eventual complete/fail is a no-op because the lock token has been cleared. |
-| **Drain** | Wait for in-flight semaphore drain. Falls back to force-requeue on timeout so the pool never silently exits under live work. |
+| **Drain**           | Wait for in-flight semaphore drain. Falls back to force-requeue on timeout so the pool never silently exits under live work.                                                              |
 
 Both modes return a `ShutdownResult`: `{ mode, timedOut, unfinishedJobs, requeued }`.
 

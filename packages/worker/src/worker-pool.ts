@@ -1,12 +1,9 @@
 import type { PanqueueConfig } from "@panqueue/config";
-import type { ConnectionOptions, QueueMap } from "@panqueue/core";
-import { notifyKey } from "@panqueue/core";
+import { type ConnectionOptions, notifyKey, type QueueMap } from "@panqueue/core";
+
 import { isWorkerDefinition, type WorkerDefinition } from "./define-worker.js";
-import {
-  RedisConnection,
-  type RedisSubscriberConnection,
-} from "./redis-connection.js";
 import { WorkerRunner } from "./internal/worker-runner.js";
+import { RedisConnection, type RedisSubscriberConnection } from "./redis-connection.js";
 
 /** Options accepted by {@link WorkerPool.shutdown}. */
 export interface ShutdownOptions {
@@ -89,10 +86,7 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
   #subscriber: RedisSubscriberConnection | null = null;
   #runners: WorkerRunner[] = [];
 
-  constructor(
-    config: PanqueueConfig<TQueues>,
-    options: WorkerPoolOptions<TQueues>,
-  ) {
+  constructor(config: PanqueueConfig<TQueues>, options: WorkerPoolOptions<TQueues>) {
     if (!options.workers || options.workers.length === 0) {
       throw new Error("WorkerPool requires at least one worker definition");
     }
@@ -100,14 +94,10 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
     const seen = new Set<string>();
     for (const def of options.workers) {
       if (!isWorkerDefinition(def)) {
-        throw new TypeError(
-          "WorkerPool workers must be created with defineWorker(...)",
-        );
+        throw new TypeError("WorkerPool workers must be created with defineWorker(...)");
       }
       if (seen.has(def.queueId)) {
-        throw new Error(
-          `Duplicate worker definition for queue "${def.queueId}"`,
-        );
+        throw new Error(`Duplicate worker definition for queue "${def.queueId}"`);
       }
       seen.add(def.queueId);
     }
@@ -126,9 +116,7 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
     if (this.#state === "running") return Promise.resolve();
     if (this.#startPromise) return this.#startPromise;
     if (this.#state !== "idle") {
-      return Promise.reject(
-        new Error(`Cannot start pool in state "${this.#state}"`),
-      );
+      return Promise.reject(new Error(`Cannot start pool in state "${this.#state}"`));
     }
 
     this.#startPromise = this.#doStart().finally(() => {
@@ -148,8 +136,8 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
       await redis.connect();
       subscriber = await redis.duplicate();
 
-      const runners = this.#definitions.map((def) =>
-        new WorkerRunner(def.queueId, def.processor, def.options, redis.client)
+      const runners = this.#definitions.map(
+        (def) => new WorkerRunner(def.queueId, def.processor, def.options, redis.client),
       );
 
       for (const runner of runners) {
@@ -168,14 +156,20 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
       if (subscriber && subscribedChannels.length > 0) {
         try {
           await subscriber.client.unsubscribe(subscribedChannels);
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
       try {
         await subscriber?.disconnect();
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       try {
         await redis.disconnect();
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       this.#state = "stopped";
       throw err;
     }
@@ -209,14 +203,13 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
     return this.#shutdownPromise;
   }
 
-  async #doShutdown(
-    mode: "force" | "drain",
-    options?: ShutdownOptions,
-  ): Promise<ShutdownResult> {
+  async #doShutdown(mode: "force" | "drain", options?: ShutdownOptions): Promise<ShutdownResult> {
     if (this.#startPromise) {
       try {
         await this.#startPromise;
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
 
     if (this.#state !== "running") {
@@ -238,16 +231,12 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
     let timedOut = false;
 
     if (mode === "drain") {
-      const drainResults = await Promise.all(
-        runners.map((r) => r.drainInflight(options?.timeout)),
-      );
+      const drainResults = await Promise.all(runners.map((r) => r.drainInflight(options?.timeout)));
       timedOut = drainResults.some((r) => r.timedOut);
     }
 
     const reason = mode === "drain" ? "shutdown-timeout" : "shutdown";
-    const requeueResults = await Promise.all(
-      runners.map((r) => r.forceRequeueInflight(reason)),
-    );
+    const requeueResults = await Promise.all(runners.map((r) => r.forceRequeueInflight(reason)));
 
     let unfinishedJobs = 0;
     let requeued = 0;
@@ -260,14 +249,20 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
     if (this.#subscriber && channels.length > 0) {
       try {
         await this.#subscriber.client.unsubscribe(channels);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     try {
       await this.#subscriber?.disconnect();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     try {
       await this.#redis?.disconnect();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     for (const runner of runners) runner.finalize();
 

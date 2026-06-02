@@ -49,11 +49,7 @@ export class LeaseRenewer {
     const tick = async () => {
       if (stopped) return;
       try {
-        const ok = await this.#scheduler.extendLock(
-          jobId,
-          this.#leaseMs,
-          lockToken,
-        );
+        const ok = await this.#scheduler.extendLock(jobId, this.#leaseMs, lockToken);
         if (ok !== "extended") {
           if (ok === "corrupt") {
             this.#onJobCorrupt(jobId, "invalid-json");

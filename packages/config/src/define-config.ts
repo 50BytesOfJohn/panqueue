@@ -1,4 +1,5 @@
 import type { QueueMap } from "@panqueue/core";
+
 import type { PanqueueConfig } from "./types.js";
 
 /**

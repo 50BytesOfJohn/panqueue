@@ -297,6 +297,7 @@ optimization for Panqueue.
 - **Claimed-job/lease abstraction**: Current direct `complete()`/`fail()` on the
   scheduler works. A `ClaimedJob` wrapper with `complete()`, `fail()`,
   `extendLock()` will be introduced alongside lock renewal and stalled detection
+
 ## 2026-03-10: Class-Based API & Three-Tier Worker Design
 
 > **Note:** The class-based `QueueClient` and `WorkerPool` APIs remain current.

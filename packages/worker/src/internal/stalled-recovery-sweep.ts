@@ -60,9 +60,7 @@ export class StalledRecoverySweep {
       const recovered = await this.#scheduler.recover(this.#batchSize);
       if (recovered.length === 0) return;
 
-      const recoveredJobIds = recovered.filter(
-        (id) => !id.startsWith("corrupt:"),
-      );
+      const recoveredJobIds = recovered.filter((id) => !id.startsWith("corrupt:"));
       for (const id of recovered) {
         if (id.startsWith("corrupt:")) {
           this.#onJobCorrupt(id.slice("corrupt:".length), "invalid-json");

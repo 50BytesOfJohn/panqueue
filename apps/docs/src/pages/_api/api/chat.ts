@@ -1,16 +1,10 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import {
-  convertToModelMessages,
-  stepCountIs,
-  streamText,
-  tool,
-  type UIMessage,
-} from "ai";
-import { z } from "zod";
-import { source } from "@/lib/source";
+import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { Document, type DocumentData } from "flexsearch";
-
 import type { ApiContext } from "waku/router";
+import { z } from "zod";
+
+import { source } from "@/lib/source";
 
 interface CustomDocument extends DocumentData {
   url: string;
@@ -84,9 +78,7 @@ export async function POST(req: Request, context: ApiContext<"/api/chat">) {
   const reqJson = await req.json();
 
   const result = streamText({
-    model: openrouter.chat(
-      process.env.OPENROUTER_MODEL ?? "google/gemini-3.1-flash-lite",
-    ),
+    model: openrouter.chat(process.env.OPENROUTER_MODEL ?? "google/gemini-3.1-flash-lite"),
     stopWhen: stepCountIs(5),
     tools: {
       search: searchTool,

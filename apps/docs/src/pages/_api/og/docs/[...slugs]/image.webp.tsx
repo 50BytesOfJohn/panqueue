@@ -1,10 +1,11 @@
-import { appName } from '@/lib/shared';
-import { source } from '@/lib/source';
-import { ImageResponse } from '@takumi-rs/image-response';
-import { generate as DefaultImage } from 'fumadocs-ui/og/takumi';
-import { ApiContext } from 'waku/router';
+import { ImageResponse } from "@takumi-rs/image-response";
+import { generate as DefaultImage } from "fumadocs-ui/og/takumi";
+import { ApiContext } from "waku/router";
 
-export async function GET(_: Request, { params }: ApiContext<'/og/docs/[...slugs]/image.webp'>) {
+import { appName } from "@/lib/shared";
+import { source } from "@/lib/source";
+
+export async function GET(_: Request, { params }: ApiContext<"/og/docs/[...slugs]/image.webp">) {
   const page = source.getPage(params.slugs);
 
   if (!page) return new Response(undefined, { status: 404 });
@@ -14,7 +15,7 @@ export async function GET(_: Request, { params }: ApiContext<'/og/docs/[...slugs
     {
       width: 1200,
       height: 630,
-      format: 'webp',
+      format: "webp",
     },
   );
 }
@@ -25,7 +26,7 @@ export async function getConfig() {
     .map((item) => (item.lang ? [item.lang, ...item.slug] : item.slug));
 
   return {
-    render: 'static' as const,
+    render: "static" as const,
     staticPaths: pages,
   } as const;
 }

@@ -1,17 +1,16 @@
 import type { PanqueueConfig } from "@panqueue/config";
-import type {
-  ConnectionOptions,
-  JobData,
-  JobOptions,
-  QueueMap,
-} from "@panqueue/core";
 import {
   assertJsonSerializable,
+  type ConnectionOptions,
   generateJobId,
+  type JobData,
+  type JobOptions,
   jobsKey,
   notifyKey,
+  type QueueMap,
   waitingKey,
 } from "@panqueue/core";
+
 import { RedisConnection } from "./redis-connection.js";
 
 /** Options for enqueuing a job. */

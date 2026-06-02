@@ -1,6 +1,6 @@
-import { defineConfig } from "waku/config";
-import mdx from "fumadocs-mdx/vite";
 import tailwindcss from "@tailwindcss/vite";
+import mdx from "fumadocs-mdx/vite";
+import { defineConfig } from "waku/config";
 
 export default defineConfig({
   vite: {

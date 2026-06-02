@@ -1,14 +1,16 @@
-import type { JobData, JsonSerializable } from "@panqueue/core";
 import {
   activeKey,
   completedKey,
   corruptDataKey,
   corruptKey,
   failedKey,
+  type JobData,
   jobsKey,
+  type JsonSerializable,
   notifyKey,
   waitingKey,
 } from "@panqueue/core";
+
 import type { PanqueueWorkerClient } from "../redis-connection.js";
 
 /** Outcome of a complete() call. */
@@ -38,9 +40,7 @@ export type ClaimResult<T extends JsonSerializable = JsonSerializable> =
  * `complete()`, `fail()`, `extendLock()`, and `recover()` Lua scripts
  * across all modes.
  */
-export abstract class BaseJobScheduler<
-  T extends JsonSerializable = JsonSerializable,
-> {
+export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializable> {
   protected readonly queueId: string;
   protected readonly client: PanqueueWorkerClient;
 
@@ -68,11 +68,7 @@ export abstract class BaseJobScheduler<
   }
 
   /** Mark a job as failed. Returns the resulting status. */
-  async fail(
-    jobId: string,
-    error: string,
-    lockToken: string,
-  ): Promise<FailResult> {
+  async fail(jobId: string, error: string, lockToken: string): Promise<FailResult> {
     const result = await this.client.fail(
       activeKey(this.queueId),
       failedKey(this.queueId),
@@ -90,11 +86,7 @@ export abstract class BaseJobScheduler<
   }
 
   /** Extend the lease deadline on an active job. Returns true if extended. */
-  async extendLock(
-    jobId: string,
-    leaseMs: number,
-    lockToken: string,
-  ): Promise<ExtendLockResult> {
+  async extendLock(jobId: string, leaseMs: number, lockToken: string): Promise<ExtendLockResult> {
     const result = await this.client.extendLock(
       activeKey(this.queueId),
       jobsKey(this.queueId),
@@ -149,34 +141,32 @@ export abstract class BaseJobScheduler<
 }
 
 function parseCompleteResult(result: unknown): CompleteResult {
-  if (
-    result === "completed" || result === "stale" || result === "missing" ||
-    result === "corrupt"
-  ) return result;
+  if (result === "completed" || result === "stale" || result === "missing" || result === "corrupt")
+    return result;
   throw new Error(`Unexpected complete result: ${String(result)}`);
 }
 
 function parseFailResult(result: unknown): FailResult {
   if (
-    result === "waiting" || result === "failed" || result === "stale" ||
-    result === "missing" || result === "corrupt"
-  ) return result;
+    result === "waiting" ||
+    result === "failed" ||
+    result === "stale" ||
+    result === "missing" ||
+    result === "corrupt"
+  )
+    return result;
   throw new Error(`Unexpected fail result: ${String(result)}`);
 }
 
 function parseExtendLockResult(result: unknown): ExtendLockResult {
-  if (
-    result === "extended" || result === "stale" || result === "missing" ||
-    result === "corrupt"
-  ) return result;
+  if (result === "extended" || result === "stale" || result === "missing" || result === "corrupt")
+    return result;
   throw new Error(`Unexpected extendLock result: ${String(result)}`);
 }
 
 function parseRequeueActiveResult(result: unknown): RequeueActiveResult {
-  if (
-    result === "waiting" || result === "stale" || result === "missing" ||
-    result === "corrupt"
-  ) return result;
+  if (result === "waiting" || result === "stale" || result === "missing" || result === "corrupt")
+    return result;
   throw new Error(`Unexpected requeueActive result: ${String(result)}`);
 }
 
