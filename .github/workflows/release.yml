@@ -29,7 +29,7 @@ jobs:
       client: ${{ steps.release.outputs['packages/client--release_created'] }}
       worker: ${{ steps.release.outputs['packages/worker--release_created'] }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           config-file: release-please-config.json
@@ -45,11 +45,11 @@ jobs:
       contents: read
       id-token: write # npm provenance + JSR OIDC
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
