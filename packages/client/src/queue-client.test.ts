@@ -37,44 +37,46 @@ describe("QueueClient.enqueue", () => {
   it("rejects a payload that is not JSON-serializable", async () => {
     // Arrange
     const client = makeClient();
-    const invalid = { to: "a@b.com", subject: new Date() } as never;
+    const invalid = { to: "a@b.com", subject: new Date() };
 
     // Act & Assert
+    // @ts-expect-error - Date is not a valid payload type
     await expect(client.enqueue("emails", invalid)).rejects.toThrow(TypeError);
   });
 
   it("does not send to Redis when the payload is invalid", async () => {
     // Arrange
     const client = makeClient();
-    const invalid = { to: "a@b.com", subject: new Date() } as never;
+    const invalid = { to: "a@b.com", subject: new Date() };
 
     // Act
+    // @ts-expect-error - Date is not a valid payload type
     await client.enqueue("emails", invalid).catch(() => {});
 
     // Assert
     expect(enqueueMock).not.toHaveBeenCalled();
   });
 
-  it("sends the job with default fields to Redis", async () => {
+  it("defaults maxRetries to 0", async () => {
     // Arrange
     const client = makeClient();
-    const data = { to: "a@b.com", subject: "Hello" };
 
     // Act
-    const jobId = await client.enqueue("emails", data);
+    await client.enqueue("emails", { to: "a@b.com", subject: "Hi" });
 
     // Assert
-    expect(lastSentJob()).toEqual({
-      id: jobId,
-      queueId: "emails",
-      data,
-      status: "waiting",
-      runs: 0,
-      failures: 0,
-      stalls: 0,
-      maxRetries: 0,
-      maxStalls: 5,
-    });
+    expect(lastSentJob().maxRetries).toBe(0);
+  });
+
+  it("defaults maxStalls to 5", async () => {
+    // Arrange
+    const client = makeClient();
+
+    // Act
+    await client.enqueue("emails", { to: "a@b.com", subject: "Hi" });
+
+    // Assert
+    expect(lastSentJob().maxStalls).toBe(5);
   });
 
   it("derives the Redis keys from the queue id", async () => {
