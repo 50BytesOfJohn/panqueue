@@ -25,3 +25,7 @@ changes, change core stuff if needed.
   minimal, simple clean and clear, no historical data, or bloating comments
 - In docs, always keep the current shape of what we decided. No bloat of, why we
   won't use other thing etc. Just the clean and clear current state of art.
+
+# Codex
+
+* Always run pnpm and other commands that requires network outside of sandbox, otherwise it won't work and can break things.
