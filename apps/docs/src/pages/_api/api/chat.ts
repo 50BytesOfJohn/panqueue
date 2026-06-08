@@ -74,7 +74,7 @@ const systemPrompt = [
   "If you cannot find the answer in search results, say you do not know and suggest a better search query.",
 ].join("\n");
 
-export async function POST(req: Request, context: ApiContext<"/api/chat">) {
+export async function POST(req: Request, _context: ApiContext<"/api/chat">) {
   const reqJson = await req.json();
 
   const result = streamText({
