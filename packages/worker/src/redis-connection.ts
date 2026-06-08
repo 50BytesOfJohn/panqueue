@@ -112,9 +112,7 @@ async function openRawClient(options: ConnectionOptions) {
     ...buildClientOptions(options),
     scripts: WORKER_SCRIPTS,
   });
-  client.on("error", (err: Error) => {
-    console.error("[panqueue] Redis connection error:", err.message);
-  });
+  client.on("error", () => {});
   await client.connect();
   return client;
 }

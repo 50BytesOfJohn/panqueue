@@ -27,7 +27,7 @@ export interface WorkerEventHandlers<T extends JsonSerializable = JsonSerializab
   onJobAckError?(job: JobData<T>, phase: "complete" | "fail", error: unknown): void;
   /** Called when stalled jobs are recovered by this runner's sweep. */
   onJobRecovered?(jobIds: string[]): void;
-  /** Called on internal errors. Falls back to console.error when not provided. */
+  /** Called on internal errors. */
   onError?(context: string, error: unknown): void;
   /** Called on every lifecycle state transition for this runner. */
   onStateChange?(from: WorkerState, to: WorkerState): void;

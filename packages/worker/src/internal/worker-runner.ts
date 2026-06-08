@@ -366,8 +366,6 @@ export class WorkerRunner {
       } catch {
         /* swallow */
       }
-    } else {
-      console.error(`[panqueue] ${context}:`, error);
     }
   }
 
