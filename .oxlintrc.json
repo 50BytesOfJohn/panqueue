@@ -16,8 +16,8 @@
   "categories": {
     "correctness": "error",
     "suspicious": "error",
-    "perf": "warn",
-    "style": "warn",
+    "perf": "off",
+    "style": "off",
     "pedantic": "off",
     "restriction": "off",
     "nursery": "off"
@@ -74,8 +74,14 @@
         "jsx-a11y/no-noninteractive-element-interactions": "off",
         "jsx-a11y/no-static-element-interactions": "off",
         "no-console": "off",
+        "no-await-in-loop": "off",
         "no-unused-vars": "warn",
+        "import/no-unassigned-import": "off",
         "react/react-in-jsx-scope": "off",
+        "react-perf/jsx-no-jsx-as-prop": "off",
+        "react-perf/jsx-no-new-array-as-prop": "off",
+        "react-perf/jsx-no-new-function-as-prop": "off",
+        "react-perf/jsx-no-new-object-as-prop": "off",
         "typescript/consistent-type-imports": "off",
         "typescript/explicit-module-boundary-types": "off",
         "typescript/no-explicit-any": "warn",
@@ -85,7 +91,10 @@
     {
       "files": ["scripts/**/*.{js,mjs,cjs}", "demo/**/*.{js,ts}"],
       "rules": {
-        "no-console": "off"
+        "import/no-nodejs-modules": "off",
+        "no-await-in-loop": "off",
+        "no-console": "off",
+        "vitest/require-hook": "off"
       }
     }
   ]

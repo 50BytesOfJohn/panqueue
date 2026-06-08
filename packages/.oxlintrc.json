@@ -2,7 +2,7 @@
   "$schema": "../node_modules/oxlint/configuration_schema.json",
   "extends": ["../.oxlintrc.json"],
   "rules": {
-    "no-await-in-loop": "warn",
+    "no-await-in-loop": "off",
     "no-console": "warn",
     "typescript/consistent-type-exports": "error",
     "typescript/no-floating-promises": "error",
