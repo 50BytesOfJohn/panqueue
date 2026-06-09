@@ -28,4 +28,4 @@ changes, change core stuff if needed.
 
 # Codex
 
-* Always run pnpm and other commands that requires network outside of sandbox, otherwise it won't work and can break things.
+- Always run pnpm and other commands that requires network outside of sandbox, otherwise it won't work and can break things.
