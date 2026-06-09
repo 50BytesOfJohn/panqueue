@@ -45,7 +45,7 @@ file, then import that file from producers and workers.
     };
 
     export const pq = definePanqueueConfig<Queues>({
-      redis: { url: Deno.env.get("REDIS_URL") ?? "redis://localhost:6379" },
+      redis: { url: "redis://localhost:6379" },
       queues: {
         email: { concurrency: { scope: "global" } },
         thumbnail: {},
@@ -169,23 +169,47 @@ payloads. Serialize them into plain JSON values before enqueueing.
   </Tab>
 </Tabs>
 
-Use environment variables in the config file when connection values differ by
-environment:
+Use your runtime's environment API in the config file when connection values
+differ by environment:
 
-```ts
-const redisUrl = Deno.env.get("REDIS_URL");
+<Tabs items={["Node / Bun", "Deno"]}>
+  <Tab value="Node / Bun">
 
-if (!redisUrl) {
-  throw new Error("REDIS_URL is required");
-}
+    ```ts
+    const redisUrl = process.env.REDIS_URL;
 
-export const pq = definePanqueueConfig<Queues>({
-  redis: { url: redisUrl },
-  queues: {
-    email: {},
-  },
-});
-```
+    if (!redisUrl) {
+      throw new Error("REDIS_URL is required");
+    }
+
+    export const pq = definePanqueueConfig<Queues>({
+      redis: { url: redisUrl },
+      queues: {
+        email: {},
+      },
+    });
+    ```
+
+  </Tab>
+  <Tab value="Deno">
+
+    ```ts
+    const redisUrl = Deno.env.get("REDIS_URL");
+
+    if (!redisUrl) {
+      throw new Error("REDIS_URL is required");
+    }
+
+    export const pq = definePanqueueConfig<Queues>({
+      redis: { url: redisUrl },
+      queues: {
+        email: {},
+      },
+    });
+    ```
+
+  </Tab>
+</Tabs>
 
 ## Queue settings
 
@@ -265,7 +289,7 @@ export type Queues = {
 };
 
 export const pq = definePanqueueConfig<Queues>({
-  redis: { url: Deno.env.get("REDIS_URL") ?? "redis://localhost:6379" },
+  redis: { url: "redis://localhost:6379" },
   queues: {
     email: {},
     thumbnail: {},

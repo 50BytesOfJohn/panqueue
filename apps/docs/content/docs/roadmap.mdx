@@ -1,0 +1,35 @@
+---
+title: Roadmap
+description: Current runtime support and planned language expansion.
+icon: Map
+---
+
+Panqueue is pre-release. The current milestone is focused on a fast, reliable
+JavaScript and TypeScript queue that runs on Node, Bun, and Deno.
+
+## Current milestone
+
+- One TypeScript source tree
+- npm packages for Node and Bun
+- npm and JSR install paths for Deno
+- ESM-only packages with generated type declarations
+- Redis-backed global FIFO queues
+- Inline workers, retries, leases, stalled-job recovery, and reliable shutdown
+
+## Next library work
+
+- Delayed jobs
+- Retry backoff
+- Repeatable jobs
+- Keyed concurrency
+- Job progress reporting
+- Job deduplication
+- Runtime schema validation for queue payloads
+
+## Language expansion
+
+Panqueue is designed around a Redis protocol that can be shared across language
+implementations. JavaScript and TypeScript come first. Rust is the next planned
+language target after the initial JS/TS packages are stable.
+
+Rust support is not part of the first public release.

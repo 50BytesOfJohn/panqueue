@@ -19,7 +19,7 @@ for your runtime:
 
 ```sh
 # Node / Bun
-npm i @panqueue/config @panqueue/client @panqueue/worker
+pnpm add @panqueue/config @panqueue/client @panqueue/worker
 
 # Deno (via npm)
 deno add npm:@panqueue/config npm:@panqueue/client npm:@panqueue/worker
@@ -30,8 +30,8 @@ deno add jsr:@panqueue/config jsr:@panqueue/client jsr:@panqueue/worker
 
 For a producer-only service, install `@panqueue/config` and
 `@panqueue/client`. For a worker-only service, install `@panqueue/config` and
-`@panqueue/worker`. The shared `@panqueue/core` package is pulled in
-automatically. All packages are ESM-only.
+`@panqueue/worker`. The shared `@panqueue/core` package is public but usually
+pulled in automatically. All packages are ESM-only.
 
 ## Start Redis
 
@@ -53,6 +53,8 @@ const redisUrl = "redis://localhost:6379";
 | Requirement | Version                  |
 | ----------- | ------------------------ |
 | Runtime     | Node 22+, Bun, or Deno   |
+| Language    | JavaScript or TypeScript |
+| Registry    | npm or JSR               |
 | Modules     | ESM only                 |
 | Storage     | Redis 7+                 |
 | Payloads    | JSON-serializable values |

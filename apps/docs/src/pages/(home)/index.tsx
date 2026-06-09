@@ -8,11 +8,16 @@ import { Link } from "waku";
 
 import { CopyButton } from "@/components/ui/copy-button";
 
-const INSTALL_CMD = "deno add jsr:@panqueue/config jsr:@panqueue/client jsr:@panqueue/worker";
+const INSTALL_CMD = "pnpm add @panqueue/config @panqueue/client @panqueue/worker";
 
 const CONFIG_CODE = `import { definePanqueueConfig } from "@panqueue/config";
 
-const config = definePanqueueConfig({
+type Queues = {
+  email: { to: string; subject: string };
+  thumbnail: { url: string };
+};
+
+const config = definePanqueueConfig<Queues>({
   redis: { url: "redis://localhost:6379" },
   queues: {
     email:     {},
@@ -87,7 +92,7 @@ export default function Home() {
         {/* Status badge */}
         <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-fd-border bg-fd-card px-3 py-1 text-xs text-fd-muted-foreground">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-fd-primary" />
-          Pre-release · v0.0.1 · Deno · Redis 7+
+          Pre-release · v0.0.1 · Node · Bun · Deno · Redis 7+
         </div>
 
         {/* Title */}
@@ -96,11 +101,11 @@ export default function Home() {
         </h1>
 
         <p className="mb-2 text-lg font-medium text-fd-muted-foreground sm:text-xl">
-          Redis-backed job queue for Deno
+          Runtime-agnostic Redis job queues for JavaScript and TypeScript
         </p>
-        <p className="mb-10 max-w-md text-sm leading-relaxed text-fd-muted-foreground/70">
-          Type-safe queues with at-least-once delivery, lease-based recovery, and atomic Lua
-          scripts. No race conditions.
+        <p className="mb-10 max-w-xl text-sm leading-relaxed text-fd-muted-foreground/70">
+          First-class on Node, Bun, and Deno. Published to npm and JSR from one TypeScript source
+          tree.
         </p>
 
         {/* Install command */}

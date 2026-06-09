@@ -5,8 +5,8 @@
 <h1 align="center">Panqueue</h1>
 
 <p align="center">
-  <strong>Redis-backed job queue for Node, Bun, and Deno</strong><br>
-  Type-safe queues with at-least-once delivery, lease-based recovery, and atomic Lua scripts.
+  <strong>Runtime-agnostic Redis job queues for JavaScript and TypeScript</strong><br>
+  First-class on Node, Bun, and Deno, with typed payloads, at-least-once delivery, lease-based recovery, and atomic Lua scripts.
 </p>
 
 ---
@@ -15,6 +15,9 @@
 
 Panqueue is pre-release. The API is stabilising toward v0.1 but may still change.
 See [TODO.md](./TODO.md) for remaining work.
+
+Panqueue currently targets JavaScript and TypeScript across Node, Bun, and Deno.
+The same TypeScript source tree is published to npm and JSR.
 
 ## Features
 
@@ -38,21 +41,22 @@ All packages are **ESM-only** and ship with first-class types.
 
 ## Installation
 
-Panqueue is published to both **npm** and **JSR** from the same source.
+Install `@panqueue/config` anywhere you define or import the shared queue
+contract, then add `@panqueue/client` for producers and `@panqueue/worker` for
+consumers. `@panqueue/core` is pulled in automatically.
 
 ```sh
 # Node / Bun
-npm i @panqueue/client @panqueue/worker      # or: pnpm add … / bun add …
+pnpm add @panqueue/config @panqueue/client @panqueue/worker
 
 # Deno (via npm)
-deno add npm:@panqueue/client npm:@panqueue/worker
+deno add npm:@panqueue/config npm:@panqueue/client npm:@panqueue/worker
 
 # Deno (via JSR)
-deno add jsr:@panqueue/client jsr:@panqueue/worker
+deno add jsr:@panqueue/config jsr:@panqueue/client jsr:@panqueue/worker
 ```
 
-`@panqueue/config` and `@panqueue/core` are pulled in automatically as
-dependencies. You also need a Redis server (7+).
+You also need a Redis server (7+).
 
 ## Quick start
 
@@ -61,11 +65,16 @@ dependencies. You also need a Redis server (7+).
 ```ts
 import { definePanqueueConfig } from "@panqueue/config";
 
-const config = definePanqueueConfig({
+type Queues = {
+  email: { to: string; subject: string };
+  thumbnail: { url: string };
+};
+
+const config = definePanqueueConfig<Queues>({
   redis: { url: "redis://localhost:6379" },
   queues: {
-    email: { mode: "global" },
-    thumbnail: { mode: "global" },
+    email: {},
+    thumbnail: {},
   },
 });
 ```
@@ -155,10 +164,10 @@ interface WorkerEventHandlers<T> {
   onJobRetry?(job: JobData<T>, error: string): void;
   onJobStale?(job: JobData<T>, phase: "complete" | "fail"): void;
   onJobCorrupt?(jobId: string, reason: string): void;
-  onJobAckError?(job: JobData<T>, phase: "complete" | "fail", detail: string): void;
-  onJobRecovered?(jobId: string, reason: string): void;
-  onError?(error: unknown): void;
-  onStateChange?(state: WorkerState): void;
+  onJobAckError?(job: JobData<T>, phase: "complete" | "fail", error: unknown): void;
+  onJobRecovered?(jobIds: string[]): void;
+  onError?(context: string, error: unknown): void;
+  onStateChange?(from: WorkerState, to: WorkerState): void;
 }
 ```
 
@@ -181,10 +190,11 @@ Each job tracks three independent counters: `runs` (claims), `failures` (handler
 
 Both modes return a `ShutdownResult`: `{ mode, timedOut, unfinishedJobs, requeued }`.
 
-## Compatibility
+## Runtime and Registry Support
 
 - **Runtimes:** Node 22+, Bun, and Deno
-- **Registries:** npm (primary) and JSR
+- **Languages:** JavaScript and TypeScript
+- **Registries:** npm and JSR
 - **Modules:** ESM only
 - **Redis:** 7+ (uses `HEXISTS`, `ZMSCORE`, and `TIME`)
 

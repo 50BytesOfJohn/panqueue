@@ -1,12 +1,12 @@
 ---
 title: Panqueue
-description: Redis-backed job queues for Node, Bun, and Deno, with typed producers and workers.
+description: Runtime-agnostic Redis job queues for JavaScript and TypeScript.
 icon: Boxes
 ---
 
-Panqueue is a Deno-native job queue backed by Redis. It gives you typed queue
-payloads, atomic Redis transitions, and at-least-once delivery without adding a
-hosted queue service to your stack.
+Panqueue is a runtime-agnostic job queue backed by Redis. It gives JavaScript
+and TypeScript projects typed queue payloads, atomic Redis transitions, and
+at-least-once delivery without adding a hosted queue service to your stack.
 
 <Callout type="warn" title="Pre-release">
   Panqueue is not released yet. The docs describe the current shape of the library while the API is
@@ -48,9 +48,10 @@ hosted queue service to your stack.
 
 ## Current scope
 
-Panqueue currently targets Deno and Redis 7+. The first version focuses on
-global FIFO queues, JSON-serializable payloads, inline processors, retries, and
-reliable worker shutdown.
+Panqueue currently targets Node, Bun, and Deno with npm and JSR packages built
+from one TypeScript source tree. The first version focuses on global FIFO
+queues, JSON-serializable payloads, inline processors, retries, and reliable
+worker shutdown.
 
-Detailed API reference, deployment notes, and operational guides will come after
-the first tutorial pages are stable.
+Detailed API reference, deployment notes, operational guides, and language-port
+roadmap details will come after the first tutorial pages are stable.

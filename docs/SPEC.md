@@ -1,11 +1,13 @@
 # panqueue — Library Specification
 
-> BullMQ-inspired job queue library for Deno. Redis-backed, self-hosted, no
-> cloud dependencies.
+> Runtime-agnostic Redis job queue library for JavaScript and TypeScript.
+> Self-hosted, no cloud dependencies.
 
 ## Scope
 
-- **Runtime:** Deno only (stable APIs, no Deploy/KV/cloud-specific features)
+- **Runtime:** Node 22+, Bun, and Deno
+- **Language:** JavaScript and TypeScript
+- **Registries:** npm and JSR
 - **Storage:** Redis only (adapter interface extracted for future extensibility)
 - **Deployment:** Docker + any Redis instance — Railway, Fly, VPS, local dev
 - **Dependencies:** One Redis driver, zero platform APIs
@@ -14,30 +16,31 @@
 
 1. **Redis is the single source of truth.** All job state, scheduling, metadata,
    and results live in Redis. No secondary stores.
-2. **No cloud coupling.** The library assumes nothing about hosting. A Deno
-   Docker container and a Redis URL is the entire infrastructure contract.
+2. **No cloud coupling.** The library assumes nothing about hosting. A runtime
+   process and a Redis URL are the infrastructure contract.
 3. **Adapter interface extracted, not abstracted prematurely.** Build the Redis
    implementation first, then derive the storage interface from real
    requirements. Don't design a generic interface upfront.
-4. **Deno-native DX.** TypeScript-first, no build step, published to JSR,
-   leverages Deno-specific features where they provide real value.
+4. **Runtime-agnostic DX.** TypeScript-first, ESM-only, published to npm and
+   JSR from one source tree, with first-class support for Node, Bun, and Deno.
 5. **Alpha label, production-quality core.** v0.1 may be advertised as alpha
    while the API settles, but the storage and delivery semantics should be
    correct enough for real workloads.
 
 ## Package Structure
 
-Three packages with clear dependency direction:
+Four packages with clear dependency direction:
 
-| Package            | Purpose                                                 | Depends on         |
-| ------------------ | ------------------------------------------------------- | ------------------ |
-| `@panqueue/config` | Shared queue definitions, types, `definePanqueueConfig` | —                  |
-| `@panqueue/client` | Producer API (`QueueClient`)                            | `@panqueue/config` |
-| `@panqueue/worker` | Consumer API (`defineWorker`, `WorkerPool`)             | `@panqueue/config` |
+| Package            | Purpose                                                 | Depends on                 |
+| ------------------ | ------------------------------------------------------- | -------------------------- |
+| `@panqueue/core`   | Shared types, key helpers, serialization primitives     | —                          |
+| `@panqueue/config` | Shared queue definitions, types, `definePanqueueConfig` | `@panqueue/core`           |
+| `@panqueue/client` | Producer API (`QueueClient`)                            | `@panqueue/config`, `core` |
+| `@panqueue/worker` | Consumer API (`defineWorker`, `WorkerPool`)             | `@panqueue/config`, `core` |
 
-`@panqueue/config` is the shared foundation. It contains no runtime logic beyond
-the identity function `definePanqueueConfig` and the associated types. It
-changes rarely and caches well.
+`@panqueue/core` holds the shared runtime primitives. `@panqueue/config` is the
+shared application contract. It contains no runtime logic beyond the identity
+function `definePanqueueConfig` and the associated types.
 
 Neither `@panqueue/client` nor `@panqueue/worker` depends on the other. A
 monorepo service imports `config` + `client`. A worker service imports
@@ -57,7 +60,7 @@ type QueueMap = {
 };
 
 export const pq = definePanqueueConfig<QueueMap>({
-  redis: { url: Deno.env.get("REDIS_URL")! },
+  redis: { url: "redis://localhost:6379" },
   queues: {
     email: {},
     image: {},
@@ -97,7 +100,7 @@ from them and the explicit generic parameter becomes unnecessary:
 ```ts
 // future
 export const pq = definePanqueueConfig({
-  redis: { url: Deno.env.get("REDIS_URL")! },
+  redis: { url: "redis://localhost:6379" },
   queues: {
     email: { schema: emailSchema },
   },
@@ -241,21 +244,20 @@ panqueue should make duplicates controllable, not impossible.
 
 ## Executor Model
 
-Three tiers of job execution, user-selectable per queue or per job type:
+v0.1 supports inline execution only. Future versions may add isolated
+executors, user-selectable per queue or per job type:
 
-| Executor       | Isolation                       | Use Case                                                                            |
-| -------------- | ------------------------------- | ----------------------------------------------------------------------------------- |
-| **Inline**     | None (same process)             | Trusted, lightweight jobs. Fastest. Default.                                        |
-| **Web Worker** | V8 isolate + Deno permissions   | Per-job-type permission scoping (network, fs, env). Key differentiator over BullMQ. |
-| **Subprocess** | Full process via `Deno.Command` | Maximum isolation. Untrusted or native-dependent workloads.                         |
+| Executor           | Isolation           | Use Case                                     |
+| ------------------ | ------------------- | -------------------------------------------- |
+| **Inline**         | None (same process) | Trusted, lightweight jobs. Fastest. Default. |
+| **Runtime worker** | Runtime isolate     | Isolated JS/TS work using the host runtime.  |
+| **Subprocess**     | Full process        | Untrusted or native-dependent workloads.     |
 
-### Deno Permission Scoping (Web Worker executor)
+### Runtime isolation
 
-Workers can be spawned with granular, per-job-type permissions. This is a
-Deno-exclusive feature and a primary differentiator.
-
-Example intent: an image processing job gets write access to `/tmp` and network
-access to a single S3 endpoint, nothing else.
+Isolated executors should use the best primitive available in each runtime, such
+as Node worker threads, Web Workers, or subprocesses. Runtime-specific
+permission controls can be added where the host supports them.
 
 ## Redis Requirements
 
@@ -351,7 +353,7 @@ continuing. Exact API to be decided.
 - Retry backoff
 - Repeatable/cron jobs (Redis-backed scheduler)
 - Keyed concurrency
-- Web Worker executor with Deno permission scoping
+- Runtime worker executor
 - Subprocess executor
 - Job progress reporting
 - Job deduplication (see below)
@@ -407,23 +409,21 @@ job.
 - Runtime schema validation (per-queue schemas replacing the generic parameter)
 - Storage adapter interface extraction + alternative backends
 - Dashboard (separate package)
-- Cross-runtime support
+- Additional language implementations, with Rust planned next after JS/TS
 
 ## Non-Goals
 
 - Deno Deploy compatibility
 - Deno KV integration
 - Built-in HTTP API or dashboard (separate concern)
-- Cross-runtime support in v1
 - Managing Redis infrastructure
 
 ## Positioning
 
-The Deno ecosystem currently has no production-grade job queue. Existing options
-are either Node-locked (BullMQ), runtime-specific toys (kvmq), or too
-early-stage (remq). panqueue targets the gap: a focused, reliable, Redis-backed
-queue with clean Deno-native DX and a unique sandboxing model via Deno's
-permission system.
+Most mature JavaScript queue libraries are tied to one runtime or one package
+registry. panqueue targets the gap: a focused, reliable, Redis-backed queue for
+Node, Bun, and Deno with npm and JSR distribution from one TypeScript source
+tree.
 
 ## v0.1 Inline Executor Concurrency (Normative)
 

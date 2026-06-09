@@ -1,11 +1,11 @@
 # Docs
 
-`SPEC.md` is the single source of truth for the library spec (current behavior
-and planned designs).
+`SPEC.md` is the single source of truth for the runtime-agnostic library spec
+(current behavior and planned designs).
 
 ## Files
 
-- `SPEC.md` — authoritative library specification
+- `SPEC.md` — authoritative library specification for Node, Bun, and Deno
 - `DECISIONS.md` — non-authoritative decision log / rationale / history
 
 ## Doc Hygiene

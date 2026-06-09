@@ -11,9 +11,10 @@ example.
 
 ```sh
 # Node / Bun
-npm i @panqueue/config @panqueue/client @panqueue/worker
+pnpm add @panqueue/config @panqueue/client @panqueue/worker
+pnpm add -D tsx
 
-# Deno
+# Deno (via JSR)
 deno add jsr:@panqueue/config jsr:@panqueue/client jsr:@panqueue/worker
 ```
 
@@ -91,14 +92,17 @@ await pool.start();
 Start the worker process in one terminal:
 
 ```sh
-deno run -A worker.ts
+pnpm exec tsx worker.ts
 ```
 
 Enqueue a job from another terminal:
 
 ```sh
-deno run -A enqueue.ts
+pnpm exec tsx enqueue.ts
 ```
+
+For Bun, run the same files with `bun worker.ts` and `bun enqueue.ts`. For
+Deno, run them with `deno run -A worker.ts` and `deno run -A enqueue.ts`.
 
 The worker receives the job from Redis, runs the processor, and records the job
 state with Panqueue's Redis scripts.
