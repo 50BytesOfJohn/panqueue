@@ -1,14 +1,17 @@
 import { defineScript, type CommandParser } from "redis";
 
+import type { QueueKeys } from "@panqueue/core";
+
 import type { PanqueueRedisScript } from "./types.js";
 
-type EnqueueScriptArguments = [
-  jobsKey: string,
-  waitingKey: string,
-  notifyKey: string,
-  jobId: string,
-  serialized: string,
-];
+/** Non-key arguments for the enqueue script. */
+export interface EnqueueArgs {
+  jobId: string;
+  /** Serialized JobData (JSON string). */
+  serialized: string;
+}
+
+type EnqueueScriptArguments = [keys: QueueKeys, args: EnqueueArgs];
 
 export type EnqueueScript = PanqueueRedisScript<EnqueueScriptArguments>;
 
@@ -47,23 +50,15 @@ redis.call('PUBLISH', KEYS[3], ARGV[1])
 return ARGV[1]
 `,
   /**
-   * @param parser  - command parser (injected by node-redis)
-   * @param jobsKey - jobs hash key      (e.g. {q:emails}:jobs)
-   * @param waitingKey - waiting list key (e.g. {q:emails}:waiting)
-   * @param notifyKey - notify channel    (e.g. {q:emails}:notify)
-   * @param jobId   - job ID
-   * @param serialized - serialized job data (JSON string)
+   * KEYS[1..3] = jobs, waiting, notify; ARGV[1..2] = jobId, serialized.
+   *
+   * @param parser - command parser (injected by node-redis)
+   * @param keys   - the queue's key bundle
+   * @param args   - {@link EnqueueArgs}
    */
-  parseCommand(
-    parser: CommandParser,
-    jobsKey: string,
-    waitingKey: string,
-    notifyKey: string,
-    jobId: string,
-    serialized: string,
-  ): void {
-    parser.pushKeys([jobsKey, waitingKey, notifyKey]);
-    parser.push(jobId, serialized);
+  parseCommand(parser: CommandParser, keys: QueueKeys, args: EnqueueArgs): void {
+    parser.pushKeys([keys.jobs, keys.waiting, keys.notify]);
+    parser.push(args.jobId, args.serialized);
   },
   transformReply(reply: unknown): unknown {
     return reply;

@@ -1,4 +1,4 @@
-import { jobsKey, notifyKey, waitingKey } from "@panqueue/core";
+import { queueKeys } from "@panqueue/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createQueueClient, QueueClient } from "./queue-client.js";
@@ -27,7 +27,7 @@ type TestQueues = {
 const makeClient = () => new QueueClient<TestQueues>({ connection: "redis://localhost:6379" });
 
 /** The serialized JobData sent to Redis by the most recent enqueue call. */
-const lastSentJob = () => JSON.parse(enqueueMock.mock.calls[0][4]);
+const lastSentJob = () => JSON.parse(enqueueMock.mock.calls[0][1].serialized);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -79,7 +79,7 @@ describe("QueueClient.enqueue", () => {
     expect(lastSentJob().maxStalls).toBe(5);
   });
 
-  it("derives the Redis keys from the queue id", async () => {
+  it("derives the Redis key bundle from the queue id", async () => {
     // Arrange
     const client = makeClient();
 
@@ -87,11 +87,7 @@ describe("QueueClient.enqueue", () => {
     await client.enqueue("emails", { to: "a@b.com", subject: "Hello" });
 
     // Assert
-    expect(enqueueMock.mock.calls[0].slice(0, 3)).toEqual([
-      jobsKey("emails"),
-      waitingKey("emails"),
-      notifyKey("emails"),
-    ]);
+    expect(enqueueMock.mock.calls[0][0]).toEqual(queueKeys("emails"));
   });
 
   it("uses the retries option as maxRetries", async () => {

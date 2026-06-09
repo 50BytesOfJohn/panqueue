@@ -1,16 +1,19 @@
 import { defineScript, type CommandParser } from "redis";
 
+import type { QueueKeys } from "@panqueue/core";
+
 import type { PanqueueRedisScript } from "./types.js";
 
-type ExtendLockScriptArguments = [
-  activeKey: string,
-  jobsKey: string,
-  corruptKey: string,
-  corruptDataKey: string,
-  jobId: string,
-  lockToken: string,
-  leaseMs: string,
-];
+/** Non-key arguments for the extend-lock script. */
+export interface ExtendLockArgs {
+  jobId: string;
+  /** Lock token held by the caller; fences against stalled recovery. */
+  lockToken: string;
+  /** Lease duration in milliseconds. */
+  leaseMs: number;
+}
+
+type ExtendLockScriptArguments = [keys: QueueKeys, args: ExtendLockArgs];
 
 export type ExtendLockScript = PanqueueRedisScript<ExtendLockScriptArguments>;
 
@@ -69,27 +72,16 @@ redis.call('HSET', KEYS[2], ARGV[1], cjson.encode(job))
 return 'extended'
 `,
   /**
-   * @param parser      - command parser (injected by node-redis)
-   * @param activeKey   - active ZSET    (e.g. {q:emails}:active)
-   * @param jobsKey     - jobs hash      (e.g. {q:emails}:jobs)
-   * @param corruptKey  - corrupt ZSET   (e.g. {q:emails}:corrupt)
-   * @param corruptDataKey - corrupt data hash
-   * @param jobId       - job ID
-   * @param lockToken   - lock token held by the caller
-   * @param leaseMs     - lease duration in ms
+   * KEYS[1..4] = active, jobs, corrupt, corruptData;
+   * ARGV[1..3] = jobId, lockToken, leaseMs.
+   *
+   * @param parser - command parser (injected by node-redis)
+   * @param keys   - the queue's key bundle
+   * @param args   - {@link ExtendLockArgs}
    */
-  parseCommand(
-    parser: CommandParser,
-    activeKey: string,
-    jobsKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    jobId: string,
-    lockToken: string,
-    leaseMs: string,
-  ): void {
-    parser.pushKeys([activeKey, jobsKey, corruptKey, corruptDataKey]);
-    parser.push(jobId, lockToken, leaseMs);
+  parseCommand(parser: CommandParser, keys: QueueKeys, args: ExtendLockArgs): void {
+    parser.pushKeys([keys.active, keys.jobs, keys.corrupt, keys.corruptData]);
+    parser.push(args.jobId, args.lockToken, args.leaseMs.toString());
   },
   transformReply(reply: unknown): unknown {
     return reply;

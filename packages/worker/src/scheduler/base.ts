@@ -1,15 +1,4 @@
-import {
-  activeKey,
-  completedKey,
-  corruptDataKey,
-  corruptKey,
-  failedKey,
-  type JobData,
-  jobsKey,
-  type JsonSerializable,
-  notifyKey,
-  waitingKey,
-} from "@panqueue/core";
+import { type JobData, type JsonSerializable, type QueueKeys, queueKeys } from "@panqueue/core";
 
 import type { PanqueueWorkerClient } from "../redis-connection.js";
 
@@ -43,10 +32,13 @@ export type ClaimResult<T extends JsonSerializable = JsonSerializable> =
 export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializable> {
   protected readonly queueId: string;
   protected readonly client: PanqueueWorkerClient;
+  /** The queue's Redis key bundle, built once per scheduler. */
+  protected readonly keys: QueueKeys;
 
   constructor(queueId: string, client: PanqueueWorkerClient) {
     this.queueId = queueId;
     this.client = client;
+    this.keys = queueKeys(queueId);
   }
 
   /** Claim the next available job. Mode-specific implementation. */
@@ -54,48 +46,19 @@ export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializ
 
   /** Mark a job as completed; lockToken fences against stalled recovery. */
   async complete(jobId: string, lockToken: string): Promise<CompleteResult> {
-    const result = await this.client.complete(
-      activeKey(this.queueId),
-      completedKey(this.queueId),
-      jobsKey(this.queueId),
-      corruptKey(this.queueId),
-      corruptDataKey(this.queueId),
-      jobId,
-      lockToken,
-    );
-
+    const result = await this.client.complete(this.keys, { jobId, lockToken });
     return parseCompleteResult(result);
   }
 
   /** Mark a job as failed. Returns the resulting status. */
   async fail(jobId: string, error: string, lockToken: string): Promise<FailResult> {
-    const result = await this.client.fail(
-      activeKey(this.queueId),
-      failedKey(this.queueId),
-      waitingKey(this.queueId),
-      jobsKey(this.queueId),
-      notifyKey(this.queueId),
-      corruptKey(this.queueId),
-      corruptDataKey(this.queueId),
-      jobId,
-      error,
-      lockToken,
-    );
-
+    const result = await this.client.fail(this.keys, { jobId, error, lockToken });
     return parseFailResult(result);
   }
 
   /** Extend the lease deadline on an active job. Returns true if extended. */
   async extendLock(jobId: string, leaseMs: number, lockToken: string): Promise<ExtendLockResult> {
-    const result = await this.client.extendLock(
-      activeKey(this.queueId),
-      jobsKey(this.queueId),
-      corruptKey(this.queueId),
-      corruptDataKey(this.queueId),
-      jobId,
-      lockToken,
-      String(leaseMs),
-    );
+    const result = await this.client.extendLock(this.keys, { jobId, lockToken, leaseMs });
     return parseExtendLockResult(result);
   }
 
@@ -109,33 +72,13 @@ export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializ
     lockToken: string,
     reason = "shutdown",
   ): Promise<RequeueActiveResult> {
-    const result = await this.client.requeueActive(
-      activeKey(this.queueId),
-      waitingKey(this.queueId),
-      jobsKey(this.queueId),
-      notifyKey(this.queueId),
-      corruptKey(this.queueId),
-      corruptDataKey(this.queueId),
-      jobId,
-      lockToken,
-      reason,
-    );
+    const result = await this.client.requeueActive(this.keys, { jobId, lockToken, reason });
     return parseRequeueActiveResult(result);
   }
 
   /** Recover stalled jobs whose lease has expired. Returns recovered job IDs. */
   async recover(batchSize: number, reason = "stalled"): Promise<string[]> {
-    const result = await this.client.recover(
-      activeKey(this.queueId),
-      waitingKey(this.queueId),
-      jobsKey(this.queueId),
-      notifyKey(this.queueId),
-      failedKey(this.queueId),
-      corruptKey(this.queueId),
-      corruptDataKey(this.queueId),
-      String(batchSize),
-      reason,
-    );
+    const result = await this.client.recover(this.keys, { batchSize, reason });
     return parseStringArray(result);
   }
 }

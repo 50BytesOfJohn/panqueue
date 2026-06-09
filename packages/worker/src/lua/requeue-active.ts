@@ -1,18 +1,19 @@
 import { defineScript, type CommandParser } from "redis";
 
+import type { QueueKeys } from "@panqueue/core";
+
 import type { PanqueueRedisScript } from "./types.js";
 
-type RequeueActiveScriptArguments = [
-  activeKey: string,
-  waitingKey: string,
-  jobsKey: string,
-  notifyKey: string,
-  corruptKey: string,
-  corruptDataKey: string,
-  jobId: string,
-  lockToken: string,
-  reason: string,
-];
+/** Non-key arguments for the requeue-active script. */
+export interface RequeueActiveArgs {
+  jobId: string;
+  /** Lock token held by the caller; fences against stalled recovery. */
+  lockToken: string;
+  /** lastRequeueReason text written on the job hash. */
+  reason: string;
+}
+
+type RequeueActiveScriptArguments = [keys: QueueKeys, args: RequeueActiveArgs];
 
 export type RequeueActiveScript = PanqueueRedisScript<RequeueActiveScriptArguments>;
 
@@ -71,31 +72,23 @@ redis.call('PUBLISH', KEYS[4], ARGV[1])
 return 'waiting'
 `,
   /**
-   * @param parser     - command parser (injected by node-redis)
-   * @param activeKey  - active ZSET    (e.g. {q:emails}:active)
-   * @param waitingKey - waiting list   (e.g. {q:emails}:waiting)
-   * @param jobsKey    - jobs hash      (e.g. {q:emails}:jobs)
-   * @param notifyKey  - notify channel (e.g. {q:emails}:notify)
-   * @param corruptKey - corrupt ZSET   (e.g. {q:emails}:corrupt)
-   * @param corruptDataKey - corrupt data hash
-   * @param jobId      - job ID
-   * @param lockToken  - lock token held by the caller
-   * @param reason     - failedReason text written on the job hash
+   * KEYS[1..6] = active, waiting, jobs, notify, corrupt, corruptData;
+   * ARGV[1..3] = jobId, lockToken, reason.
+   *
+   * @param parser - command parser (injected by node-redis)
+   * @param keys   - the queue's key bundle
+   * @param args   - {@link RequeueActiveArgs}
    */
-  parseCommand(
-    parser: CommandParser,
-    activeKey: string,
-    waitingKey: string,
-    jobsKey: string,
-    notifyKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    jobId: string,
-    lockToken: string,
-    reason: string,
-  ): void {
-    parser.pushKeys([activeKey, waitingKey, jobsKey, notifyKey, corruptKey, corruptDataKey]);
-    parser.push(jobId, lockToken, reason);
+  parseCommand(parser: CommandParser, keys: QueueKeys, args: RequeueActiveArgs): void {
+    parser.pushKeys([
+      keys.active,
+      keys.waiting,
+      keys.jobs,
+      keys.notify,
+      keys.corrupt,
+      keys.corruptData,
+    ]);
+    parser.push(args.jobId, args.lockToken, args.reason);
   },
   transformReply(reply: unknown): unknown {
     return reply;

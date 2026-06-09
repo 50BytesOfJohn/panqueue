@@ -1,12 +1,4 @@
-import {
-  activeKey,
-  corruptDataKey,
-  corruptKey,
-  type JobData,
-  jobsKey,
-  type JsonSerializable,
-  waitingKey,
-} from "@panqueue/core";
+import { type JobData, type JsonSerializable } from "@panqueue/core";
 
 import { BaseJobScheduler, type ClaimResult } from "./base.js";
 
@@ -21,14 +13,7 @@ export class GlobalJobScheduler<
 > extends BaseJobScheduler<T> {
   /** Claim the next job from the waiting list using an atomic Lua script. */
   async claim(leaseMs: number): Promise<ClaimResult<T>> {
-    const result = await this.client.claimGlobal(
-      waitingKey(this.queueId),
-      activeKey(this.queueId),
-      jobsKey(this.queueId),
-      corruptKey(this.queueId),
-      corruptDataKey(this.queueId),
-      String(leaseMs),
-    );
+    const result = await this.client.claimGlobal(this.keys, { leaseMs });
 
     if (!result) return null;
     if (typeof result !== "string") {

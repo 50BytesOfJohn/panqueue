@@ -1,15 +1,16 @@
 import { defineScript, type CommandParser } from "redis";
 
+import type { QueueKeys } from "@panqueue/core";
+
 import type { PanqueueRedisScript } from "./types.js";
 
-type ClaimGlobalScriptArguments = [
-  waitingKey: string,
-  activeKey: string,
-  jobsKey: string,
-  corruptKey: string,
-  corruptDataKey: string,
-  leaseMs: string,
-];
+/** Non-key arguments for the claim-global script. */
+export interface ClaimGlobalArgs {
+  /** Lease duration in milliseconds. */
+  leaseMs: number;
+}
+
+type ClaimGlobalScriptArguments = [keys: QueueKeys, args: ClaimGlobalArgs];
 
 export type ClaimGlobalScript = PanqueueRedisScript<ClaimGlobalScriptArguments>;
 
@@ -71,23 +72,15 @@ redis.call('HSET', KEYS[3], jobId, updated)
 return updated
 `,
   /**
-   * @param parser     - command parser (injected by node-redis)
-   * @param waitingKey - waiting list   (e.g. {q:emails}:waiting)
-   * @param activeKey  - active ZSET    (e.g. {q:emails}:active)
-   * @param jobsKey    - jobs hash      (e.g. {q:emails}:jobs)
-   * @param leaseMs    - lease duration in ms
+   * KEYS[1..5] = waiting, active, jobs, corrupt, corruptData; ARGV[1] = leaseMs.
+   *
+   * @param parser - command parser (injected by node-redis)
+   * @param keys   - the queue's key bundle
+   * @param args   - {@link ClaimGlobalArgs}
    */
-  parseCommand(
-    parser: CommandParser,
-    waitingKey: string,
-    activeKey: string,
-    jobsKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    leaseMs: string,
-  ): void {
-    parser.pushKeys([waitingKey, activeKey, jobsKey, corruptKey, corruptDataKey]);
-    parser.push(leaseMs);
+  parseCommand(parser: CommandParser, keys: QueueKeys, args: ClaimGlobalArgs): void {
+    parser.pushKeys([keys.waiting, keys.active, keys.jobs, keys.corrupt, keys.corruptData]);
+    parser.push(args.leaseMs.toString());
   },
   transformReply(reply: unknown): unknown {
     return reply;

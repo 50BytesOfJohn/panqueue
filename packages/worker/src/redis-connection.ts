@@ -1,7 +1,13 @@
 import { createClient, type RedisClientOptions } from "redis";
 
-import type { ConnectionOptions } from "@panqueue/core";
+import type { ConnectionOptions, QueueKeys } from "@panqueue/core";
 
+import type { ClaimGlobalArgs } from "./lua/claim-global.js";
+import type { CompleteArgs } from "./lua/complete.js";
+import type { ExtendLockArgs } from "./lua/extend-lock.js";
+import type { FailArgs } from "./lua/fail.js";
+import type { RecoverArgs } from "./lua/recover.js";
+import type { RequeueActiveArgs } from "./lua/requeue-active.js";
 import { WORKER_SCRIPTS } from "./scripts.js";
 
 /**
@@ -20,66 +26,12 @@ export interface PanqueueSubscriber {
  */
 export interface PanqueueWorkerClient {
   disconnect(): Promise<void>;
-  claimGlobal(
-    waitingKey: string,
-    activeKey: string,
-    jobsKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    leaseMs: string,
-  ): Promise<unknown>;
-  complete(
-    activeKey: string,
-    completedKey: string,
-    jobsKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    jobId: string,
-    lockToken: string,
-  ): Promise<unknown>;
-  fail(
-    activeKey: string,
-    failedKey: string,
-    waitingKey: string,
-    jobsKey: string,
-    notifyKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    jobId: string,
-    error: string,
-    lockToken: string,
-  ): Promise<unknown>;
-  recover(
-    activeKey: string,
-    waitingKey: string,
-    jobsKey: string,
-    notifyKey: string,
-    failedKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    batchSize: string,
-    reason: string,
-  ): Promise<unknown>;
-  extendLock(
-    activeKey: string,
-    jobsKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    jobId: string,
-    lockToken: string,
-    leaseMs: string,
-  ): Promise<unknown>;
-  requeueActive(
-    activeKey: string,
-    waitingKey: string,
-    jobsKey: string,
-    notifyKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    jobId: string,
-    lockToken: string,
-    reason: string,
-  ): Promise<unknown>;
+  claimGlobal(keys: QueueKeys, args: ClaimGlobalArgs): Promise<unknown>;
+  complete(keys: QueueKeys, args: CompleteArgs): Promise<unknown>;
+  fail(keys: QueueKeys, args: FailArgs): Promise<unknown>;
+  recover(keys: QueueKeys, args: RecoverArgs): Promise<unknown>;
+  extendLock(keys: QueueKeys, args: ExtendLockArgs): Promise<unknown>;
+  requeueActive(keys: QueueKeys, args: RequeueActiveArgs): Promise<unknown>;
 }
 
 function buildClientOptions(options: ConnectionOptions): RedisClientOptions {

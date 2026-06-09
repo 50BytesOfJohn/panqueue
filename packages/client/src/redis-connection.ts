@@ -1,7 +1,8 @@
 import { createClient, type RedisClientOptions } from "redis";
 
-import type { ConnectionOptions } from "@panqueue/core";
+import type { ConnectionOptions, QueueKeys } from "@panqueue/core";
 
+import type { EnqueueArgs } from "./lua/enqueue.js";
 import { CLIENT_SCRIPTS } from "./scripts.js";
 
 /**
@@ -11,13 +12,7 @@ import { CLIENT_SCRIPTS } from "./scripts.js";
  */
 export interface PanqueueProducerClient {
   disconnect(): Promise<void>;
-  enqueue(
-    jobsKey: string,
-    waitingKey: string,
-    notifyKey: string,
-    jobId: string,
-    serialized: string,
-  ): Promise<unknown>;
+  enqueue(keys: QueueKeys, args: EnqueueArgs): Promise<unknown>;
 }
 
 function buildClientOptions(options: ConnectionOptions): RedisClientOptions {

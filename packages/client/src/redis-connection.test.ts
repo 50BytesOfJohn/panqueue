@@ -13,7 +13,11 @@ vi.mock(import("redis"), async (importOriginal) => ({
   createClient: createClientMock,
 }));
 
-let fakeClient: { on: ReturnType<typeof vi.fn>; connect: typeof connectMock; disconnect: typeof disconnectMock };
+let fakeClient: {
+  on: ReturnType<typeof vi.fn>;
+  connect: typeof connectMock;
+  disconnect: typeof disconnectMock;
+};
 
 /** The options object passed to `createClient` by the most recent connect. */
 const passedOptions = () => createClientMock.mock.calls[0][0];

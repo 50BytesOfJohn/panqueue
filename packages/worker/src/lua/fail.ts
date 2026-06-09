@@ -1,19 +1,19 @@
 import { defineScript, type CommandParser } from "redis";
 
+import type { QueueKeys } from "@panqueue/core";
+
 import type { PanqueueRedisScript } from "./types.js";
 
-type FailScriptArguments = [
-  activeKey: string,
-  failedKey: string,
-  waitingKey: string,
-  jobsKey: string,
-  notifyKey: string,
-  corruptKey: string,
-  corruptDataKey: string,
-  jobId: string,
-  error: string,
-  lockToken: string,
-];
+/** Non-key arguments for the fail script. */
+export interface FailArgs {
+  jobId: string;
+  /** Error message recorded on the job. */
+  error: string;
+  /** Lock token held by the caller; fences against stalled recovery. */
+  lockToken: string;
+}
+
+type FailScriptArguments = [keys: QueueKeys, args: FailArgs];
 
 export type FailScript = PanqueueRedisScript<FailScriptArguments>;
 
@@ -83,41 +83,24 @@ else
 end
 `,
   /**
-   * @param parser     - command parser (injected by node-redis)
-   * @param activeKey  - active ZSET    (e.g. {q:emails}:active)
-   * @param failedKey  - failed ZSET    (e.g. {q:emails}:failed)
-   * @param waitingKey - waiting list   (e.g. {q:emails}:waiting)
-   * @param jobsKey    - jobs hash      (e.g. {q:emails}:jobs)
-   * @param notifyKey  - notify channel (e.g. {q:emails}:notify)
-   * @param corruptKey - corrupt ZSET   (e.g. {q:emails}:corrupt)
-   * @param corruptDataKey - corrupt data hash
-   * @param jobId      - job ID
-   * @param error      - error message
-   * @param lockToken  - lock token held by the caller
+   * KEYS[1..7] = active, failed, waiting, jobs, notify, corrupt, corruptData;
+   * ARGV[1..3] = jobId, error, lockToken.
+   *
+   * @param parser - command parser (injected by node-redis)
+   * @param keys   - the queue's key bundle
+   * @param args   - {@link FailArgs}
    */
-  parseCommand(
-    parser: CommandParser,
-    activeKey: string,
-    failedKey: string,
-    waitingKey: string,
-    jobsKey: string,
-    notifyKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    jobId: string,
-    error: string,
-    lockToken: string,
-  ): void {
+  parseCommand(parser: CommandParser, keys: QueueKeys, args: FailArgs): void {
     parser.pushKeys([
-      activeKey,
-      failedKey,
-      waitingKey,
-      jobsKey,
-      notifyKey,
-      corruptKey,
-      corruptDataKey,
+      keys.active,
+      keys.failed,
+      keys.waiting,
+      keys.jobs,
+      keys.notify,
+      keys.corrupt,
+      keys.corruptData,
     ]);
-    parser.push(jobId, error, lockToken);
+    parser.push(args.jobId, args.error, args.lockToken);
   },
   transformReply(reply: unknown): unknown {
     return reply;

@@ -5,10 +5,8 @@ import {
   generateJobId,
   type JobData,
   type JobOptions,
-  jobsKey,
-  notifyKey,
   type QueueMap,
-  waitingKey,
+  queueKeys,
 } from "@panqueue/core";
 
 import { RedisConnection } from "./redis-connection.js";
@@ -113,13 +111,7 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
 
     await this.#redis.connect();
 
-    await this.#redis.client.enqueue(
-      jobsKey(queueId),
-      waitingKey(queueId),
-      notifyKey(queueId),
-      jobId,
-      serialized,
-    );
+    await this.#redis.client.enqueue(queueKeys(queueId), { jobId, serialized });
 
     return jobId;
   }

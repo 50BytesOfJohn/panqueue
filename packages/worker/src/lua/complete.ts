@@ -1,16 +1,17 @@
 import { defineScript, type CommandParser } from "redis";
 
+import type { QueueKeys } from "@panqueue/core";
+
 import type { PanqueueRedisScript } from "./types.js";
 
-type CompleteScriptArguments = [
-  activeKey: string,
-  completedKey: string,
-  jobsKey: string,
-  corruptKey: string,
-  corruptDataKey: string,
-  jobId: string,
-  lockToken: string,
-];
+/** Non-key arguments for the complete script. */
+export interface CompleteArgs {
+  jobId: string;
+  /** Lock token held by the caller; fences against stalled recovery. */
+  lockToken: string;
+}
+
+type CompleteScriptArguments = [keys: QueueKeys, args: CompleteArgs];
 
 export type CompleteScript = PanqueueRedisScript<CompleteScriptArguments>;
 
@@ -63,27 +64,16 @@ redis.call('HSET', KEYS[3], ARGV[1], cjson.encode(job))
 return 'completed'
 `,
   /**
-   * @param parser       - command parser (injected by node-redis)
-   * @param activeKey    - active ZSET    (e.g. {q:emails}:active)
-   * @param completedKey - completed ZSET (e.g. {q:emails}:completed)
-   * @param jobsKey      - jobs hash      (e.g. {q:emails}:jobs)
-   * @param corruptKey   - corrupt ZSET   (e.g. {q:emails}:corrupt)
-   * @param corruptDataKey - corrupt data hash
-   * @param jobId        - job ID
-   * @param lockToken    - the lock token held by the caller
+   * KEYS[1..5] = active, completed, jobs, corrupt, corruptData;
+   * ARGV[1..2] = jobId, lockToken.
+   *
+   * @param parser - command parser (injected by node-redis)
+   * @param keys   - the queue's key bundle
+   * @param args   - {@link CompleteArgs}
    */
-  parseCommand(
-    parser: CommandParser,
-    activeKey: string,
-    completedKey: string,
-    jobsKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    jobId: string,
-    lockToken: string,
-  ): void {
-    parser.pushKeys([activeKey, completedKey, jobsKey, corruptKey, corruptDataKey]);
-    parser.push(jobId, lockToken);
+  parseCommand(parser: CommandParser, keys: QueueKeys, args: CompleteArgs): void {
+    parser.pushKeys([keys.active, keys.completed, keys.jobs, keys.corrupt, keys.corruptData]);
+    parser.push(args.jobId, args.lockToken);
   },
   transformReply(reply: unknown): unknown {
     return reply;

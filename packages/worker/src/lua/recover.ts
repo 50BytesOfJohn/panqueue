@@ -1,18 +1,18 @@
 import { defineScript, type CommandParser } from "redis";
 
+import type { QueueKeys } from "@panqueue/core";
+
 import type { PanqueueRedisScript } from "./types.js";
 
-type RecoverScriptArguments = [
-  activeKey: string,
-  waitingKey: string,
-  jobsKey: string,
-  notifyKey: string,
-  failedKey: string,
-  corruptKey: string,
-  corruptDataKey: string,
-  batchSize: string,
-  reason: string,
-];
+/** Non-key arguments for the recover script. */
+export interface RecoverArgs {
+  /** Max candidates to process per sweep. */
+  batchSize: number;
+  /** failedReason text written on recovered jobs. */
+  reason: string;
+}
+
+type RecoverScriptArguments = [keys: QueueKeys, args: RecoverArgs];
 
 export type RecoverScript = PanqueueRedisScript<RecoverScriptArguments>;
 
@@ -92,39 +92,24 @@ end
 return recovered
 `,
   /**
-   * @param parser     - command parser (injected by node-redis)
-   * @param activeKey  - active ZSET    (e.g. {q:emails}:active)
-   * @param waitingKey - waiting list   (e.g. {q:emails}:waiting)
-   * @param jobsKey    - jobs hash      (e.g. {q:emails}:jobs)
-   * @param notifyKey  - notify channel (e.g. {q:emails}:notify)
-   * @param failedKey  - failed ZSET    (e.g. {q:emails}:failed)
-   * @param corruptKey - corrupt ZSET   (e.g. {q:emails}:corrupt)
-   * @param corruptDataKey - corrupt data hash
-   * @param batchSize  - max candidates to process per sweep
-   * @param reason     - failedReason text written on the job hash
+   * KEYS[1..7] = active, waiting, jobs, notify, failed, corrupt, corruptData;
+   * ARGV[1..2] = batchSize, reason.
+   *
+   * @param parser - command parser (injected by node-redis)
+   * @param keys   - the queue's key bundle
+   * @param args   - {@link RecoverArgs}
    */
-  parseCommand(
-    parser: CommandParser,
-    activeKey: string,
-    waitingKey: string,
-    jobsKey: string,
-    notifyKey: string,
-    failedKey: string,
-    corruptKey: string,
-    corruptDataKey: string,
-    batchSize: string,
-    reason: string,
-  ): void {
+  parseCommand(parser: CommandParser, keys: QueueKeys, args: RecoverArgs): void {
     parser.pushKeys([
-      activeKey,
-      waitingKey,
-      jobsKey,
-      notifyKey,
-      failedKey,
-      corruptKey,
-      corruptDataKey,
+      keys.active,
+      keys.waiting,
+      keys.jobs,
+      keys.notify,
+      keys.failed,
+      keys.corrupt,
+      keys.corruptData,
     ]);
-    parser.push(batchSize, reason);
+    parser.push(args.batchSize.toString(), args.reason);
   },
   transformReply(reply: unknown): unknown {
     return reply;

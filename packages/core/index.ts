@@ -7,6 +7,8 @@ export type {
   QueueMap,
 } from "./src/types.js";
 
+export type { QueueKey, QueueKeys } from "./src/keys.js";
+
 export {
   activeKey,
   completedKey,
@@ -18,6 +20,7 @@ export {
   metaKey,
   notifyKey,
   queueKey,
+  queueKeys,
   waitingKey,
 } from "./src/keys.js";
 
