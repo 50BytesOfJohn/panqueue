@@ -55,9 +55,7 @@ describe("assertJsonSerializable", () => {
 
   it("rejects a BigInt", () => {
     // Arrange / Act & Assert
-    expect(() => assertJsonSerializable({ n: 10n })).toThrow(
-      /payload\.n contains a BigInt/,
-    );
+    expect(() => assertJsonSerializable({ n: 10n })).toThrow(/payload\.n contains a BigInt/);
   });
 
   it("rejects NaN", () => {
@@ -130,16 +128,16 @@ describe("assertJsonSerializable", () => {
 
   it("reports the array index in the error path", () => {
     // Arrange / Act & Assert
-    expect(() =>
-      assertJsonSerializable(["ok", "fine", { bad: undefined }]),
-    ).toThrow(/payload\[2\]\.bad contains undefined/);
+    expect(() => assertJsonSerializable(["ok", "fine", { bad: undefined }])).toThrow(
+      /payload\[2\]\.bad contains undefined/,
+    );
   });
 
   it("reports the exact nested path of the offending value", () => {
     // Arrange / Act & Assert
-    expect(() =>
-      assertJsonSerializable({ a: { b: { c: [1, 2, Symbol()] } } }),
-    ).toThrow(/payload\.a\.b\.c\[2\] contains a symbol/);
+    expect(() => assertJsonSerializable({ a: { b: { c: [1, 2, Symbol()] } } })).toThrow(
+      /payload\.a\.b\.c\[2\] contains a symbol/,
+    );
   });
 
   it("accepts nesting right at the maximum depth boundary", () => {
@@ -199,8 +197,6 @@ describe("assertJsonSerializable", () => {
     }
 
     // Act & Assert
-    expect(() => assertJsonSerializable(value)).toThrow(
-      /exceeds maximum nesting depth of 64/,
-    );
+    expect(() => assertJsonSerializable(value)).toThrow(/exceeds maximum nesting depth of 64/);
   });
 });
