@@ -1,5 +1,12 @@
-import type { PanqueueConfig } from "@panqueue/config";
-import { type ConnectionOptions, notifyKey, type QueueMap } from "@panqueue/core";
+import type { PanqueueConfig, QueueConfig } from "@panqueue/config";
+import {
+  type ConnectionOptions,
+  DEFAULT_COMPLETED_RETENTION,
+  DEFAULT_FAILED_RETENTION,
+  notifyKey,
+  type QueueMap,
+  resolveRetention,
+} from "@panqueue/core";
 
 import { isWorkerDefinition, type WorkerDefinition } from "./define-worker.js";
 import { WorkerRunner } from "./internal/worker-runner.js";
@@ -77,6 +84,7 @@ type PoolState = "idle" | "starting" | "running" | "stopping" | "stopped";
 export class WorkerPool<TQueues extends QueueMap = QueueMap> {
   readonly #connectionOptions: ConnectionOptions;
   readonly #definitions: ReadonlyArray<WorkerDefinition<TQueues>>;
+  readonly #queueConfigs: Partial<Record<string, QueueConfig>>;
 
   #state: PoolState = "idle";
   #startPromise: Promise<void> | null = null;
@@ -104,6 +112,7 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
 
     this.#connectionOptions = options.connection ?? config.redis;
     this.#definitions = options.workers;
+    this.#queueConfigs = config.queues;
   }
 
   /** Number of registered queues. */
@@ -136,9 +145,14 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
       await redis.connect();
       subscriber = await redis.duplicate();
 
-      const runners = this.#definitions.map(
-        (def) => new WorkerRunner(def.queueId, def.processor, def.options, redis.client),
-      );
+      const runners = this.#definitions.map((def) => {
+        const rule = this.#queueConfigs[def.queueId]?.retention;
+        const retention = {
+          completed: resolveRetention(rule?.completed, DEFAULT_COMPLETED_RETENTION),
+          failed: resolveRetention(rule?.failed, DEFAULT_FAILED_RETENTION),
+        };
+        return new WorkerRunner(def.queueId, def.processor, def.options, redis.client, retention);
+      });
 
       for (const runner of runners) {
         const channel = notifyKey(runner.queueId);

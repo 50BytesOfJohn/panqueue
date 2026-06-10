@@ -1,4 +1,6 @@
-import type { ConnectionOptions, QueueMap } from "@panqueue/core";
+import type { ConnectionOptions, QueueMap, RetentionRule } from "@panqueue/core";
+
+export type { RetentionRule } from "@panqueue/core";
 
 /** Per-queue configuration within the shared config. */
 export interface QueueConfig {
@@ -6,6 +8,17 @@ export interface QueueConfig {
   concurrency?: {
     /** Queue-wide concurrency scope. */
     scope: "global";
+  };
+
+  /**
+   * How long Panqueue keeps finished jobs, per terminal state. `ttl` is the
+   * retention window in milliseconds.
+   */
+  retention?: {
+    /** Default: `false` — completed jobs are deleted on success. */
+    completed?: RetentionRule;
+    /** Default: `{ ttl: 604_800_000 (7 days), count: 1000 }`. */
+    failed?: RetentionRule;
   };
 }
 

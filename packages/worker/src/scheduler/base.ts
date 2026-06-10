@@ -2,11 +2,18 @@ import {
   type JobData,
   type JsonSerializable,
   type QueueKeys,
+  type ResolvedRetention,
   queueHashTag,
   queueKeys,
 } from "@panqueue/core";
 
 import type { PanqueueWorkerClient } from "../redis-connection.js";
+
+/** Resolved retention policies for both terminal states of a queue. */
+export interface QueueRetention {
+  completed: ResolvedRetention;
+  failed: ResolvedRetention;
+}
 
 /** Outcome of a complete() call. */
 export type CompleteResult = "completed" | "stale" | "missing";
@@ -29,16 +36,17 @@ export type ClaimResult<T extends JsonSerializable = JsonSerializable> = JobData
 export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializable> {
   protected readonly queueId: string;
   protected readonly client: PanqueueWorkerClient;
-  /** The queue's Redis key bundle, built once per scheduler. */
   protected readonly keys: QueueKeys;
-  /** The queue's hash-tag prefix, passed to scripts to build per-job keys. */
+  /** Hash-tag prefix, passed to scripts so they can build per-job keys. */
   protected readonly tag: string;
+  protected readonly retention: QueueRetention;
 
-  constructor(queueId: string, client: PanqueueWorkerClient) {
+  constructor(queueId: string, client: PanqueueWorkerClient, retention: QueueRetention) {
     this.queueId = queueId;
     this.client = client;
     this.keys = queueKeys(queueId);
     this.tag = queueHashTag(queueId);
+    this.retention = retention;
   }
 
   /** Claim the next available job. Mode-specific implementation. */
@@ -46,13 +54,24 @@ export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializ
 
   /** Mark a job as completed; lockToken fences against stalled recovery. */
   async complete(jobId: string, lockToken: string): Promise<CompleteResult> {
-    const result = await this.client.complete(this.keys, { jobId, lockToken, tag: this.tag });
+    const result = await this.client.complete(this.keys, {
+      jobId,
+      lockToken,
+      tag: this.tag,
+      retention: this.retention.completed,
+    });
     return parseCompleteResult(result);
   }
 
   /** Mark a job as failed. Returns the resulting status. */
   async fail(jobId: string, error: string, lockToken: string): Promise<FailResult> {
-    const result = await this.client.fail(this.keys, { jobId, error, lockToken, tag: this.tag });
+    const result = await this.client.fail(this.keys, {
+      jobId,
+      error,
+      lockToken,
+      tag: this.tag,
+      retention: this.retention.failed,
+    });
     return parseFailResult(result);
   }
 
@@ -88,7 +107,12 @@ export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializ
 
   /** Recover stalled jobs whose lease has expired. Returns recovered job IDs. */
   async recover(batchSize: number, reason = "stalled"): Promise<string[]> {
-    const result = await this.client.recover(this.keys, { batchSize, reason, tag: this.tag });
+    const result = await this.client.recover(this.keys, {
+      batchSize,
+      reason,
+      tag: this.tag,
+      retention: this.retention.failed,
+    });
     return parseStringArray(result);
   }
 }

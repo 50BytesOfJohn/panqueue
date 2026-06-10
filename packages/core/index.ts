@@ -23,6 +23,14 @@ export {
   waitingKey,
 } from "./src/keys.js";
 
+export type { ResolvedRetention, RetentionRule } from "./src/retention.js";
+
+export {
+  DEFAULT_COMPLETED_RETENTION,
+  DEFAULT_FAILED_RETENTION,
+  resolveRetention,
+} from "./src/retention.js";
+
 export { deserializeJobHash } from "./src/job-hash.js";
 export { generateJobId } from "./src/job-id.js";
 export { assertJsonSerializable } from "./src/serialization.js";

@@ -1,7 +1,8 @@
 import { defineScript, type CommandParser } from "redis";
 
-import type { QueueKeys } from "@panqueue/core";
+import type { QueueKeys, ResolvedRetention } from "@panqueue/core";
 
+import { retentionLua } from "./retention-lua.js";
 import type { PanqueueRedisScript } from "./types.js";
 
 /** Non-key arguments for the recover script. */
@@ -12,6 +13,8 @@ export interface RecoverArgs {
   reason: string;
   /** The queue's hash-tag prefix, used to build the per-job key in Lua. */
   tag: string;
+  /** Resolved retention policy for failed jobs. */
+  retention: ResolvedRetention;
 }
 
 type RecoverScriptArguments = [keys: QueueKeys, args: RecoverArgs];
@@ -31,7 +34,8 @@ export type RecoverScript = PanqueueRedisScript<RecoverScriptArguments>;
  *    - Treat the expired lease as a stall:
  *      - if stalls <= maxStalls: LPUSH back to waiting, PUBLISH notify,
  *        clear lockToken/leaseDeadline, mark status="waiting".
- *      - else: ZADD failed, mark status="failed" with failedReason=reason.
+ *      - else: apply the failed-retention policy — delete the hash, or keep
+ *        it in the failed ZSET trimmed by ttl/count bounds.
  * 3. Returns the list of recovered job IDs.
  *
  * Concurrent sweeps by different workers are safe: only the first ZREM wins,
@@ -69,8 +73,14 @@ for _, jobId in ipairs(candidates) do
           redis.call('LPUSH', KEYS[2], jobId)
           redis.call('PUBLISH', KEYS[3], jobId)
         else
-          redis.call('HSET', jobKey, 'status', 'failed', 'finishedAt', now)
-          redis.call('ZADD', KEYS[4], now, jobId)
+${retentionLua({
+  status: "failed",
+  zsetKey: "KEYS[4]",
+  jobIdArg: "jobId",
+  modeArg: "ARGV[4]",
+  ttlArg: "ARGV[5]",
+  countArg: "ARGV[6]",
+})}
         end
         table.insert(recovered, jobId)
       end
@@ -82,7 +92,7 @@ return recovered
 `,
   /**
    * KEYS[1..4] = active, waiting, notify, failed;
-   * ARGV[1..3] = batchSize, reason, tag.
+   * ARGV[1..6] = batchSize, reason, tag, retention mode, ttl, count.
    *
    * @param parser - command parser (injected by node-redis)
    * @param keys   - the queue's key bundle
@@ -90,7 +100,14 @@ return recovered
    */
   parseCommand(parser: CommandParser, keys: QueueKeys, args: RecoverArgs): void {
     parser.pushKeys([keys.active, keys.waiting, keys.notify, keys.failed]);
-    parser.push(args.batchSize.toString(), args.reason, args.tag);
+    parser.push(
+      args.batchSize.toString(),
+      args.reason,
+      args.tag,
+      args.retention.mode,
+      String(args.retention.ttl),
+      String(args.retention.count),
+    );
   },
   transformReply(reply: unknown): unknown {
     return reply;

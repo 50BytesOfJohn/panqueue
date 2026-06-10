@@ -7,7 +7,7 @@ import type {
   WorkerState,
 } from "../define-worker.js";
 import type { PanqueueWorkerClient } from "../redis-connection.js";
-import type { BaseJobScheduler } from "../scheduler/base.js";
+import type { BaseJobScheduler, QueueRetention } from "../scheduler/base.js";
 import { GlobalJobScheduler } from "../scheduler/global.js";
 import { Semaphore } from "../semaphore.js";
 import { LeaseRenewer, type LeaseRenewal } from "./lease-renewer.js";
@@ -63,6 +63,7 @@ export class WorkerRunner {
     processor: Processor,
     options: WorkerDefinitionOptions,
     client: PanqueueWorkerClient,
+    retention: QueueRetention,
   ) {
     this.queueId = queueId;
     this.#processor = processor;
@@ -74,7 +75,7 @@ export class WorkerRunner {
     this.#recoverBatchSize = options.recoverBatchSize ?? 100;
     this.#events = options.events ?? {};
 
-    this.#scheduler = new GlobalJobScheduler(queueId, client);
+    this.#scheduler = new GlobalJobScheduler(queueId, client, retention);
     this.#semaphore = new Semaphore(this.#concurrency);
     this.#leaseRenewer = new LeaseRenewer({
       scheduler: this.#scheduler,

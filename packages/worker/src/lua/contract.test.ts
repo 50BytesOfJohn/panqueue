@@ -25,12 +25,14 @@ function recordingParser(): { parser: CommandParser; keys: unknown[]; args: unkn
 
 const keys = queueKeys("t");
 
+const retention = { mode: "trim", ttl: 5000, count: 100 } as const;
+
 /** Representative non-key args for each script (shape only; values unused). */
 const ARGS = {
   claimGlobal: { leaseMs: 1000, tag: "{q:t}" },
-  complete: { jobId: "j", lockToken: "tok", tag: "{q:t}" },
-  fail: { jobId: "j", error: "boom", lockToken: "tok", tag: "{q:t}" },
-  recover: { batchSize: 10, reason: "stalled", tag: "{q:t}" },
+  complete: { jobId: "j", lockToken: "tok", tag: "{q:t}", retention },
+  fail: { jobId: "j", error: "boom", lockToken: "tok", tag: "{q:t}", retention },
+  recover: { batchSize: 10, reason: "stalled", tag: "{q:t}", retention },
   extendLock: { jobId: "j", lockToken: "tok", leaseMs: 1000, tag: "{q:t}" },
   requeueActive: { jobId: "j", lockToken: "tok", reason: "shutdown", tag: "{q:t}" },
 } as const;
@@ -60,6 +62,19 @@ describe("worker script KEYS contract", () => {
       for (const key of pushed) {
         expect(bundle.has(key)).toBe(true);
       }
+    });
+  }
+
+  for (const name of ["complete", "fail", "recover"] as const) {
+    it(`${name}: pushes the three retention ARGV as trailing string scalars`, () => {
+      // Arrange
+      const { parser, args: pushed } = recordingParser();
+
+      // Act
+      WORKER_SCRIPTS[name].parseCommand(parser, keys, ARGS[name]);
+
+      // Assert — mode, ttl, count, stringified, at the end of ARGV.
+      expect(pushed.slice(-3)).toEqual(["trim", "5000", "100"]);
     });
   }
 });
