@@ -181,6 +181,32 @@ enqueue ──▶ waiting ──▶ active ──▶ completed
 
 Each job tracks three independent counters: `runs` (claims), `failures` (handler errors), and `stalls` (lease expirations). `maxRetries` gates failures; `maxStalls` (default 5) gates stalls. All timestamps originate from Redis `TIME` inside Lua scripts.
 
+## Job retention
+
+Panqueue cleans up after itself by default: completed jobs are deleted on success, and failed jobs are kept as a bounded dead-letter set (7 days / 1000 jobs) so you can inspect or re-enqueue them — but never unbounded. Configure per queue:
+
+```ts
+import ms from "ms";
+
+const config = definePanqueueConfig<Queues>({
+  redis: { url: "redis://localhost:6379" },
+  queues: {
+    email: {
+      retention: {
+        completed: false, // default: delete on success
+        failed: { ttl: ms("7d"), count: 1000 }, // default: bounded dead-letter
+      },
+    },
+  },
+});
+```
+
+A retention rule is `false` (delete on finish), `true` (keep forever), or `{ ttl?, count? }` (keep at most `count` jobs no older than `ttl`). `ttl` is the retention window in milliseconds. Eviction runs atomically inside the same Lua scripts that finish a job.
+
+## Observability
+
+Panqueue is not a metrics or analytics store — finished jobs are retained only for operational inspection. To track failures, completions, and retries over time, forward the worker event hooks (`onJobFail`, `onJobComplete`, `onJobRetry`, …) to your logging or monitoring stack (Sentry, PostHog, structured logs).
+
 ## Shutdown semantics
 
 | Mode                | Behaviour                                                                                                                                                                                 |

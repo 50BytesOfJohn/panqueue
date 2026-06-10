@@ -32,6 +32,13 @@ Focused v0.1 TODO list from the current review and product decisions.
   - Removed from `JobOptions` along with `backoff` so the public type does not
     advertise scheduling features the runtime cannot honour.
 
+- [x] Add finished-job retention so Redis does not grow without bound.
+  - Completed jobs are deleted on success by default; failed jobs are kept as a
+    bounded dead-letter (`ttl` 7 days / `count` 1000 by default).
+  - Eviction runs inline in the complete/fail/recover Lua scripts.
+  - Failure analytics are out of scope: the worker event hooks are the
+    documented path to Sentry/PostHog/logs.
+
 - [ ] Make missing job data handling non-lossy.
   - The claim script must not permanently drop a waiting-list entry when its job
     hash is missing.
