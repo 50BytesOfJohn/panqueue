@@ -1,17 +1,24 @@
+/** Max nesting depth before we throw our own error instead of stack-overflowing. */
+const MAX_DEPTH = 64;
+
 /**
  * Assert that a value is strictly JSON-serializable.
  *
  * Rejects `undefined`, functions, symbols, `Date` instances, class instances
  * (anything whose prototype is not `Object.prototype` or `Array.prototype`),
- * `BigInt`, and `NaN`/`Infinity`.
+ * `BigInt`, `NaN`/`Infinity`, and structures nested deeper than
+ * {@link MAX_DEPTH} levels.
  *
  * @throws {TypeError} if the value is not JSON-serializable.
  */
 export function assertJsonSerializable(value: unknown): void {
-  _assertImpl(value, "payload");
+  _assertImpl(value, "payload", 0);
 }
 
-function _assertImpl(value: unknown, path: string): void {
+function _assertImpl(value: unknown, path: string, depth: number): void {
+  if (depth > MAX_DEPTH) {
+    throw new TypeError(`${path} exceeds maximum nesting depth of ${MAX_DEPTH}`);
+  }
   if (value === null) return;
 
   switch (typeof value) {
@@ -35,7 +42,6 @@ function _assertImpl(value: unknown, path: string): void {
       break;
   }
 
-  // value is an object — check for class instances
   if (value instanceof Date) {
     throw new TypeError(`${path} contains a Date instance`);
   }
@@ -54,18 +60,17 @@ function _assertImpl(value: unknown, path: string): void {
 
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
-      _assertImpl(value[i], `${path}[${i}]`);
+      _assertImpl(value[i], `${path}[${i}]`, depth + 1);
     }
     return;
   }
 
-  // Plain object check
   const proto = Object.getPrototypeOf(value);
   if (proto !== Object.prototype && proto !== null) {
     throw new TypeError(`${path} contains a class instance`);
   }
 
   for (const [key, child] of Object.entries(value)) {
-    _assertImpl(child, `${path}.${key}`);
+    _assertImpl(child, `${path}.${key}`, depth + 1);
   }
 }

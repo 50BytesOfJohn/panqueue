@@ -13,7 +13,10 @@ describe("assertJsonSerializable", () => {
 
   it("accepts nested arrays and objects", () => {
     // Arrange
-    const value = { tags: ["a", "b"], meta: { score: 0, nested: { ok: true } } };
+    const value = {
+      tags: ["a", "b"],
+      meta: { score: 0, nested: { ok: true } },
+    };
 
     // Act & Assert
     expect(() => assertJsonSerializable(value)).not.toThrow();
@@ -127,15 +130,77 @@ describe("assertJsonSerializable", () => {
 
   it("reports the array index in the error path", () => {
     // Arrange / Act & Assert
-    expect(() => assertJsonSerializable(["ok", "fine", { bad: undefined }])).toThrow(
-      /payload\[2\]\.bad contains undefined/,
-    );
+    expect(() =>
+      assertJsonSerializable(["ok", "fine", { bad: undefined }]),
+    ).toThrow(/payload\[2\]\.bad contains undefined/);
   });
 
   it("reports the exact nested path of the offending value", () => {
     // Arrange / Act & Assert
-    expect(() => assertJsonSerializable({ a: { b: { c: [1, 2, Symbol()] } } })).toThrow(
-      /payload\.a\.b\.c\[2\] contains a symbol/,
+    expect(() =>
+      assertJsonSerializable({ a: { b: { c: [1, 2, Symbol()] } } }),
+    ).toThrow(/payload\.a\.b\.c\[2\] contains a symbol/);
+  });
+
+  it("accepts nesting right at the maximum depth boundary", () => {
+    // Arrange — build 64 nested objects (depth 0..64)
+    const value: Record<string, unknown> = {};
+    let cursor: Record<string, unknown> = value;
+    for (let i = 0; i < 64; i++) {
+      const next: Record<string, unknown> = {};
+      cursor.next = next;
+      cursor = next;
+    }
+
+    // Act & Assert
+    expect(() => assertJsonSerializable(value)).not.toThrow();
+  });
+
+  it("rejects nested objects past the maximum depth", () => {
+    // Arrange — build 65 nested objects
+    const value: Record<string, unknown> = {};
+    let cursor: Record<string, unknown> = value;
+    for (let i = 0; i < 65; i++) {
+      const next: Record<string, unknown> = {};
+      cursor.next = next;
+      cursor = next;
+    }
+
+    // Act & Assert
+    expect(() => assertJsonSerializable(value)).toThrow(
+      /payload\.next(\.next){64} exceeds maximum nesting depth of 64/,
+    );
+  });
+
+  it("rejects nested arrays past the maximum depth", () => {
+    // Arrange — build 65 nested arrays
+    const value: unknown[] = [];
+    let cursor: unknown[] = value;
+    for (let i = 0; i < 65; i++) {
+      const next: unknown[] = [];
+      cursor.push(next);
+      cursor = next;
+    }
+
+    // Act & Assert
+    expect(() => assertJsonSerializable(value)).toThrow(
+      /payload(\[0\]){65} exceeds maximum nesting depth of 64/,
+    );
+  });
+
+  it("does not stack overflow on pathologically deep payloads", () => {
+    // Arrange — build a deeply nested payload well past any engine limit
+    const value: Record<string, unknown> = {};
+    let cursor: Record<string, unknown> = value;
+    for (let i = 0; i < 10_000; i++) {
+      const next: Record<string, unknown> = {};
+      cursor.next = next;
+      cursor = next;
+    }
+
+    // Act & Assert
+    expect(() => assertJsonSerializable(value)).toThrow(
+      /exceeds maximum nesting depth of 64/,
     );
   });
 });
