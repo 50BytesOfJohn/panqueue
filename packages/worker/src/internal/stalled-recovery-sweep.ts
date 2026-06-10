@@ -1,4 +1,4 @@
-import type { BaseJobScheduler } from "../scheduler/base.js";
+import type { BaseJobScheduler, RecoveredJob } from "../scheduler/base.js";
 
 /** Collaborators and tuning a {@link StalledRecoverySweep} needs. */
 export interface StalledRecoverySweepOptions {
@@ -7,20 +7,20 @@ export interface StalledRecoverySweepOptions {
   batchSize: number;
   /** Whether sweeping should currently run (e.g. runner still "running"). */
   isActive(): boolean;
-  onJobRecovered(jobIds: string[]): void;
+  onRecovered(jobs: RecoveredJob[]): void;
   onError(context: string, error: unknown): void;
 }
 
 /**
  * Periodically asks the scheduler to recover jobs whose lease expired,
- * routing recovered ids to the runner's events.
+ * routing recovered jobs to the runner's events.
  */
 export class StalledRecoverySweep {
   readonly #scheduler: Pick<BaseJobScheduler, "recover">;
   readonly #intervalMs: number;
   readonly #batchSize: number;
   readonly #isActive: () => boolean;
-  readonly #onJobRecovered: (jobIds: string[]) => void;
+  readonly #onRecovered: (jobs: RecoveredJob[]) => void;
   readonly #onError: (context: string, error: unknown) => void;
 
   #timer: ReturnType<typeof setInterval> | null = null;
@@ -30,7 +30,7 @@ export class StalledRecoverySweep {
     this.#intervalMs = options.intervalMs;
     this.#batchSize = options.batchSize;
     this.#isActive = options.isActive;
-    this.#onJobRecovered = options.onJobRecovered;
+    this.#onRecovered = options.onRecovered;
     this.#onError = options.onError;
   }
 
@@ -57,7 +57,7 @@ export class StalledRecoverySweep {
       const recovered = await this.#scheduler.recover(this.#batchSize);
       if (recovered.length === 0) return;
 
-      this.#onJobRecovered(recovered);
+      this.#onRecovered(recovered);
     } catch (err) {
       this.#onError("recover", err);
     }

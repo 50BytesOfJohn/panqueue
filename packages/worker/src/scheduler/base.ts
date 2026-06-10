@@ -3,6 +3,7 @@ import {
   type JsonSerializable,
   type QueueKeys,
   type ResolvedRetention,
+  deserializeJobHash,
   queueHashTag,
   queueKeys,
 } from "@panqueue/core";
@@ -25,6 +26,14 @@ export type RequeueActiveResult = "waiting" | "stale" | "missing";
 export type ExtendLockResult = "extended" | "stale" | "missing";
 /** Outcome of a claim call. */
 export type ClaimResult<T extends JsonSerializable = JsonSerializable> = JobData<T> | null;
+
+/** A stalled job processed by a recovery sweep. */
+export interface RecoveredJob<T extends JsonSerializable = JsonSerializable> {
+  /** "waiting" when requeued for another attempt; "failed" when terminal. */
+  outcome: "waiting" | "failed";
+  /** Job snapshot taken inside the sweep, before retention could delete it. */
+  job: JobData<T>;
+}
 
 /**
  * Abstract base class for Redis job scheduling operations.
@@ -105,15 +114,18 @@ export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializ
     return parseRequeueActiveResult(result);
   }
 
-  /** Recover stalled jobs whose lease has expired. Returns recovered job IDs. */
-  async recover(batchSize: number, reason = "stalled"): Promise<string[]> {
+  /**
+   * Recover stalled jobs whose lease has expired. Returns one entry per
+   * processed job with its outcome and a snapshot of the job hash.
+   */
+  async recover(batchSize: number, reason = "stalled: lease expired"): Promise<RecoveredJob<T>[]> {
     const result = await this.client.recover(this.keys, {
       batchSize,
       reason,
       tag: this.tag,
       retention: this.retention.failed,
     });
-    return parseStringArray(result);
+    return parseRecoveredJobs<T>(result);
   }
 }
 
@@ -138,18 +150,22 @@ function parseRequeueActiveResult(result: unknown): RequeueActiveResult {
   throw new Error(`Unexpected requeueActive result: ${String(result)}`);
 }
 
-function parseStringArray(result: unknown): string[] {
+function parseRecoveredJobs<T extends JsonSerializable>(result: unknown): RecoveredJob<T>[] {
   if (result === null || result === undefined) return [];
   if (!Array.isArray(result)) {
     throw new Error(`Unexpected recover result: ${String(result)}`);
   }
 
-  const values: string[] = [];
+  const recovered: RecoveredJob<T>[] = [];
   for (const item of result) {
-    if (typeof item !== "string") {
+    if (!Array.isArray(item) || item.length === 0) {
       throw new Error(`Unexpected recover item: ${String(item)}`);
     }
-    values.push(item);
+    const [outcome, ...flat] = item as string[];
+    if (outcome !== "waiting" && outcome !== "failed") {
+      throw new Error(`Unexpected recover outcome: ${String(outcome)}`);
+    }
+    recovered.push({ outcome, job: deserializeJobHash<T>(flat) });
   }
-  return values;
+  return recovered;
 }

@@ -1,4 +1,4 @@
-import type { JobData } from "@panqueue/core";
+import type { JobData, JobStatus } from "@panqueue/core";
 
 import type {
   Processor,
@@ -7,7 +7,7 @@ import type {
   WorkerState,
 } from "../define-worker.js";
 import type { PanqueueWorkerClient } from "../redis-connection.js";
-import type { BaseJobScheduler, QueueRetention } from "../scheduler/base.js";
+import type { BaseJobScheduler, QueueRetention, RecoveredJob } from "../scheduler/base.js";
 import { GlobalJobScheduler } from "../scheduler/global.js";
 import { Semaphore } from "../semaphore.js";
 import { LeaseRenewer, type LeaseRenewal } from "./lease-renewer.js";
@@ -81,15 +81,15 @@ export class WorkerRunner {
       scheduler: this.#scheduler,
       leaseMs: this.#leaseMs,
       lockRenewMs: this.#lockRenewMs,
-      onError: (context, error) => this.#emitError(context, error),
+      onError: (scope, error) => this.#emitWorkerError(scope, error),
     });
     this.#recoverySweep = new StalledRecoverySweep({
       scheduler: this.#scheduler,
       intervalMs: this.#recoverIntervalMs,
       batchSize: this.#recoverBatchSize,
       isActive: () => this.#state === "running",
-      onJobRecovered: (jobIds) => this.#emitJobRecovered(jobIds),
-      onError: (context, error) => this.#emitError(context, error),
+      onRecovered: (jobs) => this.#handleRecovered(jobs),
+      onError: (scope, error) => this.#emitWorkerError(scope, error),
     });
   }
 
@@ -166,7 +166,7 @@ export class WorkerRunner {
       if (r.status === "fulfilled") {
         if (r.value === "waiting") requeued++;
       } else {
-        this.#emitError(`requeue:${stillRunning[i].jobId}`, r.reason);
+        this.#emitWorkerError(`requeue:${stillRunning[i].jobId}`, r.reason);
       }
     }
 
@@ -225,7 +225,7 @@ export class WorkerRunner {
         jobData = await this.#scheduler.claim(this.#leaseMs);
       } catch (err) {
         this.#semaphore.release();
-        this.#emitError("claim", err);
+        this.#emitWorkerError("claim", err);
         await this.#waitForNotification();
         continue;
       }
@@ -253,68 +253,122 @@ export class WorkerRunner {
   }
 
   async #processJob(jobData: JobData, renewer: LeaseRenewal): Promise<void> {
-    this.#emitJobStart(jobData);
+    this.#safeEmit(this.#events.onJobStarted, { job: jobData });
 
     const lockToken = jobData.lockToken ?? "";
 
     let handlerError: unknown;
+    let handlerThrew = false;
     try {
       await this.#processor(jobData);
     } catch (err) {
       handlerError = err;
+      handlerThrew = true;
     } finally {
       renewer.stop();
     }
 
-    if (handlerError === undefined) {
+    if (!handlerThrew) {
       try {
         const result = await this.#scheduler.complete(jobData.id, lockToken);
         if (result === "completed") {
-          this.#emitJobComplete(jobData);
+          this.#safeEmit(this.#events.onJobCompleted, {
+            job: settledSnapshot(jobData, "completed"),
+          });
           return;
         }
         if (result === "stale") {
-          try {
-            this.#events.onJobStale?.(jobData, "complete");
-          } catch {
-            /* swallow */
-          }
+          this.#safeEmit(this.#events.onJobStale, { job: jobData, phase: "complete" });
           return;
         }
-        this.#emitJobAckError(jobData, "complete", result);
+        this.#safeEmit(this.#events.onJobAckError, {
+          job: jobData,
+          phase: "complete",
+          error: result,
+        });
         return;
       } catch (err) {
-        this.#emitError(`complete:${jobData.id}`, err);
-        this.#emitJobAckError(jobData, "complete", err);
+        this.#emitWorkerError(`complete:${jobData.id}`, err);
+        this.#safeEmit(this.#events.onJobAckError, { job: jobData, phase: "complete", error: err });
         return;
       }
     }
 
     const message = handlerError instanceof Error ? handlerError.message : String(handlerError);
+    const attempt = jobData.runs;
     try {
       const result = await this.#scheduler.fail(jobData.id, message, lockToken);
-      if (result === "waiting") {
-        this.#emitJobRetry(jobData, message);
-        return;
-      }
-      if (result === "failed") {
-        this.#emitJobFail(jobData, message);
-        return;
-      }
-      if (result === "stale") {
-        try {
-          this.#events.onJobStale?.(jobData, "fail");
-        } catch {
-          /* swallow */
+      if (result === "waiting" || result === "failed") {
+        // The snapshot predates the fail script; fold its durable writes in
+        // so handlers see authoritative counters and status.
+        const failures = jobData.failures + 1;
+        const job: JobData = {
+          ...settledSnapshot(jobData, result),
+          failures,
+          failureKind: "handler",
+          failedReason: message,
+          lastError: message,
+        };
+        this.#safeEmit(this.#events.onJobError, {
+          job,
+          error: handlerError,
+          attempt,
+          willRetry: result === "waiting",
+        });
+        if (result === "waiting") {
+          this.#safeEmit(this.#events.onJobRetry, {
+            job,
+            error: handlerError,
+            attempt,
+            retriesLeft: Math.max(0, job.maxRetries - failures),
+            cause: "handler",
+          });
+        } else {
+          this.#safeEmit(this.#events.onJobFailed, {
+            job,
+            error: handlerError,
+            attempts: jobData.runs,
+            cause: "handler",
+          });
         }
         return;
       }
-      this.#emitJobAckError(jobData, "fail", result);
+      if (result === "stale") {
+        this.#safeEmit(this.#events.onJobStale, { job: jobData, phase: "fail" });
+        return;
+      }
+      this.#safeEmit(this.#events.onJobAckError, { job: jobData, phase: "fail", error: result });
       return;
     } catch (err) {
-      this.#emitError(`fail:${jobData.id}`, err);
-      this.#emitJobAckError(jobData, "fail", err);
+      this.#emitWorkerError(`fail:${jobData.id}`, err);
+      this.#safeEmit(this.#events.onJobAckError, { job: jobData, phase: "fail", error: err });
       return;
+    }
+  }
+
+  /**
+   * Translate sweep results into per-job events. These fire on the worker
+   * that swept the queue, which is not necessarily the one that ran the job.
+   */
+  #handleRecovered(jobs: RecoveredJob[]): void {
+    for (const { outcome, job } of jobs) {
+      const error = new Error(job.failedReason ?? "lease expired");
+      if (outcome === "waiting") {
+        this.#safeEmit(this.#events.onJobRetry, {
+          job,
+          error,
+          attempt: job.runs,
+          retriesLeft: Math.max(0, job.maxStalls - job.stalls),
+          cause: "stalled",
+        });
+      } else {
+        this.#safeEmit(this.#events.onJobFailed, {
+          job,
+          error,
+          attempts: job.runs,
+          cause: "stalled",
+        });
+      }
     }
   }
 
@@ -335,68 +389,29 @@ export class WorkerRunner {
   #transition(to: WorkerState): void {
     const from = this.#state;
     this.#state = to;
+    this.#safeEmit(this.#events.onStateChange, { from, to });
+  }
+
+  #emitWorkerError(scope: string, error: unknown): void {
+    this.#safeEmit(this.#events.onWorkerError, { scope, error });
+  }
+
+  /** Invoke a user-provided handler; handler errors must never affect jobs. */
+  #safeEmit<E>(handler: ((event: E) => void) | undefined, event: E): void {
+    if (!handler) return;
     try {
-      this.#events.onStateChange?.(from, to);
+      handler(event);
     } catch {
       /* swallow */
     }
   }
+}
 
-  #emitError(context: string, error: unknown): void {
-    if (this.#events.onError) {
-      try {
-        this.#events.onError(context, error);
-      } catch {
-        /* swallow */
-      }
-    }
-  }
-
-  #emitJobStart(job: JobData): void {
-    try {
-      this.#events.onJobStart?.(job);
-    } catch {
-      /* swallow */
-    }
-  }
-
-  #emitJobComplete(job: JobData): void {
-    try {
-      this.#events.onJobComplete?.(job);
-    } catch {
-      /* swallow */
-    }
-  }
-
-  #emitJobFail(job: JobData, error: string): void {
-    try {
-      this.#events.onJobFail?.(job, error);
-    } catch {
-      /* swallow */
-    }
-  }
-
-  #emitJobRetry(job: JobData, error: string): void {
-    try {
-      this.#events.onJobRetry?.(job, error);
-    } catch {
-      /* swallow */
-    }
-  }
-
-  #emitJobRecovered(jobIds: string[]): void {
-    try {
-      this.#events.onJobRecovered?.(jobIds);
-    } catch {
-      /* swallow */
-    }
-  }
-
-  #emitJobAckError(job: JobData, phase: "complete" | "fail", error: unknown): void {
-    try {
-      this.#events.onJobAckError?.(job, phase, error);
-    } catch {
-      /* swallow */
-    }
-  }
+/**
+ * Post-acknowledgement view of a claim-time snapshot: the terminal scripts
+ * release the lease, so handlers must not see a live lock on a settled job.
+ */
+function settledSnapshot(job: JobData, status: JobStatus): JobData {
+  const { lockToken: _lockToken, leaseDeadline: _leaseDeadline, ...rest } = job;
+  return { ...rest, status };
 }

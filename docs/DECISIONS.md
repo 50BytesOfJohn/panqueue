@@ -3,6 +3,46 @@
 This file records rationale and dated decisions. It is not the source of truth
 for behavior; `SPEC.md` is authoritative.
 
+## 2026-06-10: Worker Event Surface Redesign
+
+### Decision
+
+- Worker event handlers each receive a single event object (extensible without
+  signature breaks; trivially unioned into a future generic `onEvent`).
+- Retry and terminal failure are distinct events: `onJobRetry` fires when a
+  failure is recorded and the job is requeued; `onJobFailed` fires only when
+  the job fails terminally (moved to the failed set or deleted by retention).
+  No attempt arithmetic is required to tell them apart.
+- `onJobError` additionally fires on every handler throw with a `willRetry`
+  flag, before the matching `onJobRetry`/`onJobFailed` — a single registration
+  point for error reporting (Sentry et al.). It receives the original thrown
+  value with its stack; only the message is serialized to Redis.
+- Internal worker errors moved from `onError` to `onWorkerError` so "error"
+  unambiguously means "job handler threw".
+- Terminal failure by stall exhaustion now also emits `onJobFailed` (with
+  `cause: "stalled"`); stall requeues emit `onJobRetry`. The recover script
+  returns per-job outcomes plus a hash snapshot taken before retention can
+  delete the job. `onJobRecovered` is removed. Stall events fire on the worker
+  whose sweep processed the job, not necessarily the one that ran it.
+- Lifecycle names are past tense for completed facts (`onJobStarted`,
+  `onJobCompleted`, `onJobFailed`); `onJobRetry` stays bare because it fires
+  before the retry runs.
+- All handlers remain worker-local. A global, cross-process event stream
+  (Redis Streams) is a separate future feature.
+
+### Why
+
+- BullMQ's single `failed` event forces `attemptsMade === attempts` checks to
+  detect the final failure (its `retries-exhausted` exists only on
+  QueueEvents) — a long-standing DX complaint. Sidekiq's explicit trio
+  (`error_handlers`, `sidekiq_retries_exhausted`, `death_handlers`) is the
+  pattern developers consistently prefer.
+- The fail script decides retry-vs-terminal atomically, so the worker knows
+  the outcome at emit time; explicit events cost nothing.
+- `onJobFailed` is the "this job will not succeed without intervention"
+  contract, and with delete-mode retention it is the last chance to observe
+  the job — so it must cover the stall-death path too.
+
 ## 2026-05-14: Concurrency Scope Naming
 
 ### Decision

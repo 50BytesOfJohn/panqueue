@@ -36,7 +36,10 @@ export type RecoverScript = PanqueueRedisScript<RecoverScriptArguments>;
  *        clear lockToken/leaseDeadline, mark status="waiting".
  *      - else: apply the failed-retention policy — delete the hash, or keep
  *        it in the failed ZSET trimmed by ttl/count bounds.
- * 3. Returns the list of recovered job IDs.
+ * 3. Returns one entry per recovered job: the outcome ("waiting" or
+ *    "failed") followed by the job hash as HGETALL field/value pairs. The
+ *    snapshot is taken before retention can delete a terminally failed hash,
+ *    so the worker can still emit a fully populated onJobFailed event.
  *
  * Concurrent sweeps by different workers are safe: only the first ZREM wins,
  * the others see no candidate left.
@@ -68,11 +71,17 @@ for _, jobId in ipairs(candidates) do
 
         local maxStalls = tonumber(redis.call('HGET', jobKey, 'maxStalls')) or 5
 
+        local entry
         if stalls <= maxStalls then
           redis.call('HSET', jobKey, 'status', 'waiting')
           redis.call('LPUSH', KEYS[2], jobId)
           redis.call('PUBLISH', KEYS[3], jobId)
+          entry = redis.call('HGETALL', jobKey)
+          table.insert(entry, 1, 'waiting')
         else
+          redis.call('HSET', jobKey, 'status', 'failed', 'finishedAt', now)
+          entry = redis.call('HGETALL', jobKey)
+          table.insert(entry, 1, 'failed')
 ${retentionLua({
   status: "failed",
   zsetKey: "KEYS[4]",
@@ -82,7 +91,7 @@ ${retentionLua({
   countArg: "ARGV[6]",
 })}
         end
-        table.insert(recovered, jobId)
+        table.insert(recovered, entry)
       end
     end
   end
