@@ -1,0 +1,23 @@
+---
+title: Overview
+description: A type-safe config wrapper that gives producers and workers a single source of truth.
+icon: Package
+---
+
+`@panqueue/config` provides a typed configuration object that both
+`@panqueue/client` and `@panqueue/worker` accept. It is **optional** — you can
+use the client and worker packages without it — but in apps or monorepos where
+producers and workers share queue definitions, it serves as a single source of
+truth for queue IDs, payload types, Redis connection options, and per-queue
+settings.
+
+The package has no runtime side effects. Importing it opens no connections and
+starts no processes — it is pure data.
+
+<Cards>
+  <Card
+    title="Configuration"
+    description="Define queues, Redis options, retention, and concurrency in the config."
+    href="/docs/configuration"
+  />
+</Cards>

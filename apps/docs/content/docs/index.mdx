@@ -1,25 +1,30 @@
 ---
 title: Panqueue
-description: Runtime-agnostic Redis job queues for JavaScript and TypeScript.
+description: A fast, ergonomic Redis-backed job queue for JavaScript and TypeScript.
 icon: Boxes
 ---
 
-Panqueue is a runtime-agnostic job queue backed by Redis. It gives JavaScript
-and TypeScript projects typed queue payloads, atomic Redis transitions, and
-at-least-once delivery without adding a hosted queue service to your stack.
+Panqueue is a job queue for JavaScript and TypeScript, backed by Redis. It is small,
+typed end to end, and focused on the two things a queue library has to nail:
+**speed** and **developer experience**.
+
+Define your queues once in a shared config, get full type safety on every `enqueue`
+and every worker handler, and let Panqueue handle the parts you don't want to write
+yourself: retries, dead-lettering, crashed-worker recovery, and clean shutdowns.
 
 <Callout type="warn" title="Pre-release">
   Panqueue is not released yet. The docs describe the current shape of the library while the API is
   stabilising toward the first public version.
 </Callout>
 
-## What Panqueue gives you
+## What you get
 
-- Type-safe queue IDs and payloads from a shared config
-- A small producer API for enqueueing jobs
-- Worker definitions that stay separate from worker lifecycle
-- A `WorkerPool` that owns Redis connections and shutdown
-- Lease-based recovery for jobs left behind by crashed workers
+- **Type-safe queues and payloads** from a single shared config
+- **A small producer API** for enqueueing jobs from anywhere in your app
+- **Inline worker handlers** that stay separate from worker lifecycle
+- **Automatic retries** with a bounded dead-letter set, no setup required
+- **Recovery from crashed workers** so jobs are never lost in the void
+- **Clean shutdowns** that hand in-flight work back to the queue for someone else
 
 ## Start here
 
@@ -35,23 +40,22 @@ at-least-once delivery without adding a hosted queue service to your stack.
     href="/docs/getting-started"
   />
   <Card
-    title="Configuration"
-    description="Define shared queue names, payload types, Redis, and per-queue settings."
-    href="/docs/config-package"
-  />
-  <Card
     title="Quick start"
     description="The smallest complete example in one place."
     href="/docs/quick-start"
   />
+  <Card
+    title="@panqueue/config"
+    description="Define shared queue names, payload types, Redis, and per-queue settings."
+    href="/docs/config-overview"
+  />
 </Cards>
 
-## Current scope
+## Runtime support
 
-Panqueue currently targets Node, Bun, and Deno with npm and JSR packages built
-from one TypeScript source tree. The first version focuses on global FIFO
-queues, JSON-serializable payloads, inline processors, retries, and reliable
-worker shutdown.
+Panqueue currently targets **Node, Bun, and Deno** with packages published to both
+**npm** and **JSR** from a single TypeScript source tree. All you need beyond
+Panqueue is a Redis 7+ server.
 
-Detailed API reference, deployment notes, operational guides, and language-port
-roadmap details will come after the first tutorial pages are stable.
+Detailed API reference, deployment notes, and operational guides will come after
+the first tutorial pages are stable.

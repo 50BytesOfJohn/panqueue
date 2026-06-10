@@ -1,0 +1,321 @@
+---
+title: Events
+description: React to job completions, retries, and terminal failures with typed worker event handlers.
+icon: Activity
+---
+
+Workers emit typed events for everything that happens to a job. Register
+handlers through the `events` option on `defineWorker` — every handler receives
+a single event object, and TypeScript infers the payload type from your config.
+
+```ts title="workers/email.ts"
+import { defineWorker } from "@panqueue/worker";
+import { pq } from "../panqueue.config.ts";
+
+export const emailWorker = defineWorker(
+  pq,
+  "email",
+  async (job) => {
+    await sendEmail(job.data);
+  },
+  {
+    events: {
+      onJobFailed({ job, error, attempts }) {
+        console.error(`email ${job.id} failed permanently after ${attempts} attempts`, error);
+      },
+    },
+  },
+);
+```
+
+<Cards>
+  <Card
+    title="onJobFailed"
+    description="The job is dead: retries exhausted, moved to the failed set. Alert, page, or dead-letter here."
+  />
+  <Card
+    title="onJobError"
+    description="Every handler throw, with the original error and stack. One registration point for Sentry & friends."
+  />
+  <Card
+    title="onJobRetry"
+    description="A failure was recorded and the job is queued for another attempt. Log it, no action needed."
+  />
+</Cards>
+
+## Retry and final failure are different events
+
+You never need to count attempts to find out whether a failure was the last
+one. A failing job fires `onJobRetry` while retries remain and `onJobFailed`
+exactly once, when it becomes terminal:
+
+```
+claim ──▶ onJobStarted ──▶ handler runs
+            ├─ returns ──▶ onJobCompleted
+            └─ throws ───▶ onJobError (willRetry: true | false)
+                 ├─ retries left ──▶ onJobRetry   (job back to waiting)
+                 └─ exhausted ─────▶ onJobFailed  (terminal)
+```
+
+`onJobFailed` is the _"this job will not succeed without intervention"_
+signal. It also fires when a job dies from repeated stalls (crashed workers),
+not just handler errors — check `cause` to tell the two apart.
+
+<Callout type="info" title="Last chance to see the job">
+  When the queue's failed-state retention is set to delete, `onJobFailed` is the final time the
+  job's payload is observable anywhere. Log or forward what you need inside the handler.
+</Callout>
+
+## Error reporting with one handler
+
+`onJobError` fires on **every** handler throw — before the matching
+`onJobRetry` or `onJobFailed` — and carries the original thrown value with its
+stack intact. Use it as the single place to report errors instead of
+duplicating reporting across the retry and failed handlers:
+
+<Tabs items={["Sentry", "PostHog", "Structured logs"]}>
+  <Tab value="Sentry">
+
+    ```ts
+    import * as Sentry from "@sentry/node";
+
+    const worker = defineWorker(pq, "email", processEmail, {
+      events: {
+        onJobError({ job, error, attempt, willRetry }) {
+          Sentry.captureException(error, {
+            tags: { queue: job.queueId, willRetry },
+            contexts: { job: { id: job.id, attempt } },
+          });
+        },
+      },
+    });
+    ```
+
+  </Tab>
+  <Tab value="PostHog">
+
+    ```ts
+    import { PostHog } from "posthog-node";
+
+    const posthog = new PostHog(process.env.POSTHOG_API_KEY!, {
+      host: "https://us.i.posthog.com",
+    });
+
+    const worker = defineWorker(pq, "email", processEmail, {
+      events: {
+        onJobError({ job, error, attempt, willRetry }) {
+          // PostHog error tracking: captured as an $exception event
+          // with the full stack trace.
+          posthog.captureException(error, "worker", {
+            queue: job.queueId,
+            jobId: job.id,
+            attempt,
+            willRetry,
+          });
+        },
+        onJobCompleted({ job }) {
+          posthog.capture({
+            distinctId: "worker",
+            event: "job_completed",
+            properties: { queue: job.queueId, jobId: job.id },
+          });
+        },
+      },
+    });
+    ```
+
+  </Tab>
+  <Tab value="Structured logs">
+
+    ```ts
+    import pino from "pino";
+
+    const log = pino();
+
+    const worker = defineWorker(pq, "email", processEmail, {
+      events: {
+        onJobStarted({ job }) {
+          log.info({ jobId: job.id, queue: job.queueId }, "job started");
+        },
+        onJobCompleted({ job }) {
+          log.info({ jobId: job.id }, "job completed");
+        },
+        onJobRetry({ job, attempt, retriesLeft, cause }) {
+          log.warn({ jobId: job.id, attempt, retriesLeft, cause }, "job will retry");
+        },
+        onJobFailed({ job, error, attempts, cause }) {
+          log.error({ jobId: job.id, attempts, cause, err: error }, "job failed permanently");
+        },
+        onWorkerError({ scope, error }) {
+          log.error({ scope, err: error }, "worker error");
+        },
+      },
+    });
+    ```
+
+  </Tab>
+</Tabs>
+
+Panqueue is intentionally not a metrics store — finished jobs are retained only
+for operational inspection. Forwarding events to your observability stack is
+the supported way to track failures, completions, and retries over time.
+
+## Best practices
+
+- **Alert on `onJobFailed`, report on `onJobError`, log on `onJobRetry`.**
+  Each event has one job; you rarely need the same side effect in two of them.
+- **Handlers must not throw — and if they do, it's swallowed.** Event handlers
+  can never affect job processing: a throwing handler is silently ignored. Do
+  not put logic in them that must succeed.
+- **Keep handlers fast.** They run synchronously on the job-processing path.
+  Fire-and-forget async work (an HTTP call to your APM) is fine; blocking work
+  is not.
+- **Don't drive business logic from events.** Enqueue follow-up jobs from the
+  processor, where failures are retried. Events are for observability —
+  logging, metrics, alerting.
+- **Events are local to the worker process.** A handler fires only on the
+  worker that observed the transition. If you run several worker processes for
+  the same queue, register handlers in each (they share one definition, so
+  this is usually automatic).
+
+<Callout type="warn" title="Stall events fire on the sweeping worker">
+  When a worker crashes mid-job, *another* worker's recovery sweep detects the expired lease.
+  `onJobRetry` and `onJobFailed` with `cause: "stalled"` therefore fire on whichever worker ran the
+  sweep — not the one that was running the job.
+</Callout>
+
+## Two failure causes
+
+Every retry and terminal failure carries a `cause`:
+
+| Cause       | Meaning                                                       | Budget                  |
+| ----------- | ------------------------------------------------------------- | ----------------------- |
+| `"handler"` | The processor threw.                                          | `retries` (default 0)   |
+| `"stalled"` | The job's lease expired — the worker crashed or lost contact. | `maxStalls` (default 5) |
+
+The two budgets are independent: a job fails terminally when either is
+exhausted. For `cause: "stalled"`, `event.error` is an `Error` carrying the
+recovery reason rather than a value thrown by your code.
+
+## All events
+
+| Event            | Fires when                                                         |
+| ---------------- | ------------------------------------------------------------------ |
+| `onJobStarted`   | A claimed job begins processing.                                   |
+| `onJobCompleted` | A job completes successfully.                                      |
+| `onJobError`     | The handler throws, regardless of outcome.                         |
+| `onJobRetry`     | A failure is recorded and the job is requeued for another attempt. |
+| `onJobFailed`    | A job fails terminally — no retries remain.                        |
+| `onJobStale`     | An acknowledgement was fenced off (the job's lease was lost).      |
+| `onJobAckError`  | A complete/fail acknowledgement failed or returned unusable state. |
+| `onWorkerError`  | An internal worker error: claiming, lease renewal, recovery sweep. |
+| `onStateChange`  | The worker transitions between lifecycle states.                   |
+
+### onJobStarted
+
+```ts
+onJobStarted?(event: { job: JobData<T> }): void;
+```
+
+Fires after a job is claimed, immediately before the processor runs.
+
+### onJobCompleted
+
+```ts
+onJobCompleted?(event: { job: JobData<T> }): void;
+```
+
+Fires after the success is durably acknowledged in Redis. `job.status` is
+`"completed"` and the lease fields are cleared.
+
+### onJobError
+
+```ts
+onJobError?(event: {
+  job: JobData<T>;
+  error: unknown; // the original thrown value, stack intact
+  attempt: number; // 1-based attempt that just threw
+  willRetry: boolean;
+}): void;
+```
+
+Fires on every handler throw, before the matching `onJobRetry` or
+`onJobFailed`. Does not fire for stalls — only your code throwing. Only the
+error message is persisted to Redis; the full object (and stack) exists only
+here, in-process.
+
+### onJobRetry
+
+```ts
+onJobRetry?(event: {
+  job: JobData<T>;
+  error: unknown;
+  attempt: number; // 1-based attempt that just failed or stalled
+  retriesLeft: number;
+  cause: "handler" | "stalled";
+}): void;
+```
+
+Fires after the failed attempt is durably recorded and the job is back in the
+waiting queue — before the retry actually runs. `retriesLeft` counts remaining
+attempts of the same cause: handler retries for `"handler"`, stall recoveries
+for `"stalled"`.
+
+### onJobFailed
+
+```ts
+onJobFailed?(event: {
+  job: JobData<T>;
+  error: unknown;
+  attempts: number; // total claims the job consumed
+  cause: "handler" | "stalled";
+}): void;
+```
+
+Fires exactly once per job, when it fails terminally and is moved to the
+failed set (or deleted, per retention). The core hook for alerting and
+dead-letter handling.
+
+### onJobStale
+
+```ts
+onJobStale?(event: { job: JobData<T>; phase: "complete" | "fail" }): void;
+```
+
+Fires when this worker tried to acknowledge a job but its lease had already
+been lost to stalled-job recovery — the acknowledgement was a no-op and the
+job's outcome belongs to another worker now. Usually a sign the handler ran
+longer than `leaseMs` without renewals keeping up.
+
+### onJobAckError
+
+```ts
+onJobAckError?(event: {
+  job: JobData<T>;
+  phase: "complete" | "fail";
+  error: unknown;
+}): void;
+```
+
+Fires when the complete/fail acknowledgement itself failed (Redis error) or
+returned an unusable state. The job's terminal state is unknown to this
+worker; stalled-job recovery will eventually reconcile it.
+
+### onWorkerError
+
+```ts
+onWorkerError?(event: { scope: string; error: unknown }): void;
+```
+
+Fires on internal worker errors that are not tied to a single job outcome:
+claim failures, lease-renewal failures, recovery-sweep failures. `scope` names
+the operation, e.g. `"claim"` or `"extend:<jobId>"`.
+
+### onStateChange
+
+```ts
+onStateChange?(event: { from: WorkerState; to: WorkerState }): void;
+```
+
+Fires on every worker lifecycle transition:
+`"idle" → "running" → "stopping" → "stopped"`.

@@ -70,11 +70,11 @@ const emailWorker = defineWorker(
   {
     concurrency: 5,
     events: {
-      onJobComplete(job) {
+      onJobCompleted({ job }) {
         console.log(`completed ${job.id}`);
       },
-      onJobFail(job, error) {
-        console.error(`failed ${job.id}`, error);
+      onJobFailed({ job, error, attempts }) {
+        console.error(`job ${job.id} failed after ${attempts} attempts`, error);
       },
     },
   },

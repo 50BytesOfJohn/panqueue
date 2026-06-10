@@ -1,5 +1,5 @@
 ---
-title: Config Package
+title: Configuration
 description: Define shared queue names, payload types, Redis connection options, and per-queue settings.
 icon: SlidersHorizontal
 ---
@@ -234,25 +234,59 @@ export const pq = definePanqueueConfig<Queues>({
 | Option              | Type       | Default      | Description                                      |
 | ------------------- | ---------- | ------------ | ------------------------------------------------ |
 | `concurrency.scope` | `"global"` | Global scope | Applies queue concurrency as a queue-wide limit. |
+| `retention`         | `object`   | See below    | Controls how long finished jobs stay in Redis.   |
 
-Worker-level concurrency still belongs on `defineWorker`:
+## Retention
+
+Every finished job is a Redis key. Without retention, completed and failed jobs
+accumulate forever and eventually exhaust memory. Retention rules tell Panqueue
+when to evict finished jobs from Redis, so storage stays bounded.
+
+Each queue defines a policy per terminal state — `completed` (job succeeded)
+and `failed` (job exhausted retries or stalls).
+
+### RetentionRule
+
+A `RetentionRule` controls what happens to a finished job. It can be:
+
+| Value               | Behavior                                                                |
+| ------------------- | ----------------------------------------------------------------------- |
+| `false`             | Delete the job immediately on finish.                                   |
+| `true`              | Keep the job forever (unbounded growth — use with caution).             |
+| `{ ttl: number }`   | Keep for at most `ttl` milliseconds before eviction.                    |
+| `{ count: number }` | Keep at most `count` finished jobs (oldest evicted first).              |
+| `{ ttl, count }`    | Keep jobs that satisfy both bounds. Eviction runs atomically on finish. |
+
+### Defaults
+
+| State       | Default                             | Rationale                               |
+| ----------- | ----------------------------------- | --------------------------------------- |
+| `completed` | `false`                             | Successful jobs rarely need inspection. |
+| `failed`    | `{ ttl: 604_800_000, count: 1000 }` | Bounded dead-letter for debugging.      |
+
+Set custom retention per queue:
 
 ```ts
-const emailWorker = defineWorker(
-  pq,
-  "email",
-  async (job) => {
-    await sendEmail(job.data);
+export const pq = definePanqueueConfig<Queues>({
+  redis: "redis://localhost:6379",
+  queues: {
+    email: {
+      retention: {
+        completed: { count: 5000 }, // Keep last 5000 successes
+        failed: { ttl: 86_400_000, count: 100 }, // Keep failures for 24h
+      },
+    },
   },
-  {
-    concurrency: 5,
-  },
-);
+});
 ```
 
-Use the config for shared queue shape and queue-level settings. Use worker
-options for process behavior such as handler concurrency, polling, leases,
-recovery, and event handlers.
+<Callout type="warn" title="Worker concurrency is not config-level">
+  The concurrency option on `defineWorker` (e.g. `{ concurrency: 5 }`) controls how many
+  jobs a single worker process runs in parallel. That is a process-level concern — not a
+  queue-level setting inside `@panqueue/config`. Use the config for queue shape and
+  queue-level settings; use worker options for handler concurrency, polling, leases,
+  recovery, and event handlers.
+</Callout>
 
 ## Share it across packages
 
@@ -310,11 +344,12 @@ function definePanqueueConfig<TQueues extends QueueMap>(
 ): PanqueueConfig<TQueues>;
 ```
 
-| Export                    | Kind     | Description                                               |
-| ------------------------- | -------- | --------------------------------------------------------- |
-| `definePanqueueConfig`    | Function | Defines a typed Panqueue config and returns it unchanged. |
-| `PanqueueConfig<TQueues>` | Type     | Shared config object with `redis` and `queues`.           |
-| `QueueConfig`             | Type     | Per-queue settings inside `queues`.                       |
+| Export                    | Kind     | Description                                                         |
+| ------------------------- | -------- | ------------------------------------------------------------------- |
+| `definePanqueueConfig`    | Function | Defines a typed Panqueue config and returns it unchanged.           |
+| `PanqueueConfig<TQueues>` | Type     | Shared config object with `redis` and `queues`.                     |
+| `QueueConfig`             | Type     | Per-queue settings inside `queues`.                                 |
+| `RetentionRule`           | Type     | Per-state retention policy: `false`, `true`, or `{ ttl?, count? }`. |
 
 ```ts
 interface PanqueueConfig<TQueues extends QueueMap> {
@@ -325,6 +360,10 @@ interface PanqueueConfig<TQueues extends QueueMap> {
 interface QueueConfig {
   concurrency?: {
     scope: "global";
+  };
+  retention?: {
+    completed?: RetentionRule;
+    failed?: RetentionRule;
   };
 }
 ```

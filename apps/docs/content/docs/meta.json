@@ -5,8 +5,11 @@
     "installation",
     "getting-started",
     "quick-start",
-    "---Configuration---",
-    "config-package",
+    "---@panqueue/config---",
+    "config-overview",
+    "configuration",
+    "---@panqueue/worker---",
+    "worker-events",
     "---Project---",
     "roadmap"
   ]

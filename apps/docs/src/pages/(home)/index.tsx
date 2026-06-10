@@ -2,8 +2,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 import { Cards, Card } from "fumadocs-ui/components/card";
 import { DynamicCodeBlock } from "fumadocs-ui/components/dynamic-codeblock";
 import { Steps, Step } from "fumadocs-ui/components/steps";
-import { Tabs, Tab } from "fumadocs-ui/components/tabs";
-import { ArrowRight, ShieldCheck, Zap, RefreshCw, Lock, AlertTriangle, Server } from "lucide-react";
+import { ArrowRight, ShieldCheck, Repeat, Code2, Gauge } from "lucide-react";
 import { Link } from "waku";
 
 import { CopyButton } from "@/components/ui/copy-button";
@@ -17,39 +16,32 @@ type Queues = {
   thumbnail: { url: string };
 };
 
-const config = definePanqueueConfig<Queues>({
+export const pq = definePanqueueConfig<Queues>({
   redis: { url: "redis://localhost:6379" },
   queues: {
-    email:     {},
+    email: {},
     thumbnail: {},
   },
 });`;
 
 const ENQUEUE_CODE = `import { createQueueClient } from "@panqueue/client";
+import { pq } from "./panqueue.config.js";
 
-const client = createQueueClient(config);
-await client.connect();
+const client = createQueueClient(pq);
 
 await client.enqueue("email", {
   to: "user@example.com",
   subject: "Welcome!",
-});
-
-await client.disconnect();`;
+});`;
 
 const WORKER_CODE = `import { defineWorker, WorkerPool } from "@panqueue/worker";
+import { pq } from "./panqueue.config.js";
 
-const emailWorker = defineWorker(config, "email", async (job) => {
+const emailWorker = defineWorker(pq, "email", async (job) => {
   await sendEmail(job.data);
-}, {
-  concurrency: 5,
-  events: {
-    onJobComplete(job) { console.log("sent", job.data.subject); },
-    onJobFail(job, err)  { console.error("failed", err); },
-  },
-});
+}, { concurrency: 5 });
 
-const pool = new WorkerPool(config, { workers: [emailWorker] });
+const pool = new WorkerPool(pq, { workers: [emailWorker] });
 await pool.start();`;
 
 function GithubIcon({ size = 16 }: { size?: number }) {
@@ -65,7 +57,6 @@ export default function Home() {
     <div className="flex flex-col">
       {/* ── Hero ─────────────────────────────────────────── */}
       <section className="relative flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center overflow-hidden px-6 py-28 text-center">
-        {/* ambient glow */}
         <div
           className="pointer-events-none absolute inset-0"
           style={{
@@ -74,7 +65,6 @@ export default function Home() {
           }}
         />
 
-        {/* Logo */}
         <div className="relative mb-8">
           <div
             className="absolute inset-0 rounded-full opacity-50 blur-3xl"
@@ -89,26 +79,22 @@ export default function Home() {
           />
         </div>
 
-        {/* Status badge */}
         <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-fd-border bg-fd-card px-3 py-1 text-xs text-fd-muted-foreground">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-fd-primary" />
-          Pre-release · v0.0.1 · Node · Bun · Deno · Redis 7+
+          Pre-release · Node · Bun · Deno
         </div>
 
-        {/* Title */}
         <h1 className="mb-4 text-6xl font-extrabold tracking-tight text-fd-foreground sm:text-7xl lg:text-8xl">
           pan<span className="text-fd-primary">queue</span>
         </h1>
 
         <p className="mb-2 text-lg font-medium text-fd-muted-foreground sm:text-xl">
-          Runtime-agnostic Redis job queues for JavaScript and TypeScript
+          A fast, ergonomic job queue for JavaScript and TypeScript.
         </p>
         <p className="mb-10 max-w-xl text-sm leading-relaxed text-fd-muted-foreground/70">
-          First-class on Node, Bun, and Deno. Published to npm and JSR from one TypeScript source
-          tree.
+          Backed by Redis. Typed end to end. One small API you can learn in minutes.
         </p>
 
-        {/* Install command */}
         <div className="mb-8 w-full max-w-xl">
           <div className="flex items-center gap-3 rounded-xl border border-fd-border bg-fd-card px-4 py-3 font-mono text-sm">
             <span className="text-fd-primary select-none">$</span>
@@ -117,7 +103,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* CTAs */}
         <div className="flex flex-wrap items-center justify-center gap-3">
           <Link
             to="/docs"
@@ -157,46 +142,36 @@ export default function Home() {
         <div className="mx-auto max-w-4xl">
           <div className="mb-12 text-center">
             <p className="mb-2 text-xs font-semibold tracking-widest text-fd-primary uppercase">
-              Features
+              Why panqueue
             </p>
             <h2 className="text-3xl font-bold text-fd-foreground sm:text-4xl">
-              Built for reliability
+              A queue that gets out of your way
             </h2>
             <p className="mt-3 text-sm text-fd-muted-foreground">
-              Everything you need to run jobs in production without losing work.
+              Focused on the two things a queue library has to nail: speed and developer experience.
             </p>
           </div>
 
           <Cards>
             <Card
-              icon={<ShieldCheck size={18} className="text-fd-primary" />}
+              icon={<Code2 size={18} className="text-fd-primary" />}
               title="Type-safe end to end"
-              description="Shared config ties queue IDs to payload types — enqueue and defineWorker infer the right shapes automatically."
+              description="Define your queues once. Get full autocomplete and type checking on every enqueue and every worker handler — no stringly-typed payloads."
             />
             <Card
-              icon={<RefreshCw size={18} className="text-fd-primary" />}
-              title="At-least-once delivery"
-              description="Lease-based stalled-job recovery reclaims work from crashed or unresponsive workers without data loss."
+              icon={<Repeat size={18} className="text-fd-primary" />}
+              title="No work lost on crashes"
+              description="If a worker dies mid-job, another worker picks the job up automatically. Retries and a bounded dead-letter set are built in."
             />
             <Card
-              icon={<Zap size={18} className="text-fd-primary" />}
-              title="Atomic Redis scripts"
-              description="Every state transition runs inside a single Lua call — no race conditions, no partial updates."
+              icon={<Gauge size={18} className="text-fd-primary" />}
+              title="Fast and lightweight"
+              description="Lean core, no background services, no SDK lock-in. Just your code, Redis, and the queue."
             />
             <Card
-              icon={<Lock size={18} className="text-fd-primary" />}
-              title="Force-shutdown by default"
-              description="In-flight jobs are atomically requeued on shutdown so another worker picks them up immediately."
-            />
-            <Card
-              icon={<AlertTriangle size={18} className="text-fd-primary" />}
-              title="Corrupt-job quarantining"
-              description="Malformed Redis data is isolated to a dead-letter queue instead of silently dropped."
-            />
-            <Card
-              icon={<Server size={18} className="text-fd-primary" />}
-              title="Cluster-ready"
-              description="All keys use hash tags ({q:<id>}) for Redis Cluster compatibility out of the box."
+              icon={<ShieldCheck size={18} className="text-fd-primary" />}
+              title="Clean shutdowns, by default"
+              description="Stop your worker and in-flight jobs are handed back to the queue. No stranded work, no manual cleanup."
             />
           </Cards>
         </div>
@@ -210,9 +185,11 @@ export default function Home() {
               Quick start
             </p>
             <h2 className="text-3xl font-bold text-fd-foreground sm:text-4xl">
-              Up and running in minutes
+              Three files, one queue
             </h2>
-            <p className="mt-3 text-sm text-fd-muted-foreground">Three packages. Three steps.</p>
+            <p className="mt-3 text-sm text-fd-muted-foreground">
+              Define your queues, enqueue from anywhere, run workers that process jobs.
+            </p>
           </div>
 
           <Steps>
@@ -220,7 +197,11 @@ export default function Home() {
               <h3 className="mb-3 text-base font-semibold text-fd-foreground">
                 Define your queues
               </h3>
-              <DynamicCodeBlock lang="ts" code={CONFIG_CODE} codeblock={{ title: "config.ts" }} />
+              <DynamicCodeBlock
+                lang="ts"
+                code={CONFIG_CODE}
+                codeblock={{ title: "panqueue.config.ts" }}
+              />
             </Step>
 
             <Step>
@@ -229,51 +210,10 @@ export default function Home() {
             </Step>
 
             <Step>
-              <h3 className="mb-3 text-base font-semibold text-fd-foreground">
-                Define workers and run them
-              </h3>
+              <h3 className="mb-3 text-base font-semibold text-fd-foreground">Process jobs</h3>
               <DynamicCodeBlock lang="ts" code={WORKER_CODE} codeblock={{ title: "worker.ts" }} />
             </Step>
           </Steps>
-        </div>
-      </section>
-
-      {/* ── Shutdown semantics ────────────────────────────── */}
-      <section className="border-t border-fd-border px-6 py-20">
-        <div className="mx-auto max-w-4xl">
-          <div className="mb-8 text-center">
-            <p className="mb-2 text-xs font-semibold tracking-widest text-fd-primary uppercase">
-              Shutdown
-            </p>
-            <h2 className="text-2xl font-bold text-fd-foreground sm:text-3xl">
-              No jobs left behind
-            </h2>
-            <p className="mx-auto mt-3 max-w-lg text-sm text-fd-muted-foreground">
-              Force mode atomically requeues all in-flight jobs before disconnecting. Drain mode
-              waits for handlers to finish, with a timeout fallback.
-            </p>
-          </div>
-
-          <Tabs items={["Force (default)", "Drain"]}>
-            <Tab value="Force (default)">
-              <DynamicCodeBlock
-                lang="ts"
-                code={`// Atomically requeues in-flight jobs → disconnects immediately
-const result = await pool.shutdown();
-// result: ShutdownResult { mode: "force", timedOut: false, unfinishedJobs: 0, requeued: 3 }`}
-                codeblock={{ title: "shutdown.ts" }}
-              />
-            </Tab>
-            <Tab value="Drain">
-              <DynamicCodeBlock
-                lang="ts"
-                code={`// Waits for handlers; force-requeues on timeout
-const result = await pool.shutdown({ drain: true, timeout: 30_000 });
-// result: ShutdownResult { mode: "drain", timedOut: false, unfinishedJobs: 0, requeued: 1 }`}
-                codeblock={{ title: "shutdown.ts" }}
-              />
-            </Tab>
-          </Tabs>
         </div>
       </section>
 
@@ -290,7 +230,7 @@ const result = await pool.shutdown({ drain: true, timeout: 30_000 });
             Ready to start cooking?
           </h2>
           <p className="mb-8 text-sm text-fd-muted-foreground">
-            Read the docs to explore the full API, worker options, and job lifecycle.
+            The docs walk through the full API, worker options, and job lifecycle.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Link

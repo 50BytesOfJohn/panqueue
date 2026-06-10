@@ -107,11 +107,12 @@ const emailWorker = defineWorker(
   {
     concurrency: 5,
     events: {
-      onJobComplete(job) {
+      onJobCompleted({ job }) {
         console.log(`sent ${job.data.subject}`);
       },
-      onJobFail(job, error) {
-        console.error(`failed: ${error}`);
+      onJobFailed({ job, error, attempts }) {
+        // Terminal: all retries exhausted. Page someone, dead-letter, etc.
+        console.error(`job ${job.id} failed after ${attempts} attempts`, error);
       },
     },
   },
@@ -156,20 +157,51 @@ Panqueue owns all Redis connections internally. Pass connection config, not a Re
 
 ### Event handlers
 
+Every handler receives a single event object. Retry and terminal failure are
+distinct events — no attempt counting or `if` checks needed to tell them apart:
+
 ```ts
 interface WorkerEventHandlers<T> {
-  onJobStart?(job: JobData<T>): void;
-  onJobComplete?(job: JobData<T>): void;
-  onJobFail?(job: JobData<T>, error: string): void;
-  onJobRetry?(job: JobData<T>, error: string): void;
-  onJobStale?(job: JobData<T>, phase: "complete" | "fail"): void;
-  onJobCorrupt?(jobId: string, reason: string): void;
-  onJobAckError?(job: JobData<T>, phase: "complete" | "fail", error: unknown): void;
-  onJobRecovered?(jobIds: string[]): void;
-  onError?(context: string, error: unknown): void;
-  onStateChange?(from: WorkerState, to: WorkerState): void;
+  // Job lifecycle
+  onJobStarted?(event: { job: JobData<T> }): void;
+  onJobCompleted?(event: { job: JobData<T> }): void;
+  onJobRetry?(event: {
+    job: JobData<T>;
+    error: unknown; // the original thrown value, stack intact
+    attempt: number; // 1-based attempt that just failed
+    retriesLeft: number;
+    cause: "handler" | "stalled";
+  }): void;
+  onJobFailed?(event: {
+    // Terminal: no retries remain; the job moved to the failed
+    // set (or was deleted by retention). Last chance to observe it.
+    job: JobData<T>;
+    error: unknown;
+    attempts: number;
+    cause: "handler" | "stalled";
+  }): void;
+
+  // Cross-cutting: fires on every handler throw, before the matching
+  // onJobRetry/onJobFailed. One place to report all errors.
+  onJobError?(event: {
+    job: JobData<T>;
+    error: unknown;
+    attempt: number;
+    willRetry: boolean;
+  }): void;
+
+  // Plumbing
+  onJobStale?(event: { job: JobData<T>; phase: "complete" | "fail" }): void;
+  onJobAckError?(event: { job: JobData<T>; phase: "complete" | "fail"; error: unknown }): void;
+  onWorkerError?(event: { scope: string; error: unknown }): void;
+  onStateChange?(event: { from: WorkerState; to: WorkerState }): void;
 }
 ```
+
+Handlers are **local to the worker process** that observed the transition;
+errors thrown inside handlers are swallowed and never affect job processing.
+Stall-related events (`cause: "stalled"`) fire on the worker whose recovery
+sweep processed the job, which may not be the worker that ran it.
 
 ## Job lifecycle
 
@@ -205,7 +237,7 @@ A retention rule is `false` (delete on finish), `true` (keep forever), or `{ ttl
 
 ## Observability
 
-Panqueue is not a metrics or analytics store — finished jobs are retained only for operational inspection. To track failures, completions, and retries over time, forward the worker event hooks (`onJobFail`, `onJobComplete`, `onJobRetry`, …) to your logging or monitoring stack (Sentry, PostHog, structured logs).
+Panqueue is not a metrics or analytics store — finished jobs are retained only for operational inspection. To track failures, completions, and retries over time, forward the worker event hooks (`onJobError`, `onJobCompleted`, `onJobFailed`, …) to your logging or monitoring stack (Sentry, PostHog, structured logs).
 
 ## Shutdown semantics
 
