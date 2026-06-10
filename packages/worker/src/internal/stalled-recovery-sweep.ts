@@ -9,12 +9,11 @@ export interface StalledRecoverySweepOptions {
   isActive(): boolean;
   onJobRecovered(jobIds: string[]): void;
   onError(context: string, error: unknown): void;
-  onJobCorrupt(jobId: string, reason: string): void;
 }
 
 /**
  * Periodically asks the scheduler to recover jobs whose lease expired,
- * routing corrupt quarantines and recovered ids to the runner's events.
+ * routing recovered ids to the runner's events.
  */
 export class StalledRecoverySweep {
   readonly #scheduler: Pick<BaseJobScheduler, "recover">;
@@ -23,7 +22,6 @@ export class StalledRecoverySweep {
   readonly #isActive: () => boolean;
   readonly #onJobRecovered: (jobIds: string[]) => void;
   readonly #onError: (context: string, error: unknown) => void;
-  readonly #onJobCorrupt: (jobId: string, reason: string) => void;
 
   #timer: ReturnType<typeof setInterval> | null = null;
 
@@ -34,7 +32,6 @@ export class StalledRecoverySweep {
     this.#isActive = options.isActive;
     this.#onJobRecovered = options.onJobRecovered;
     this.#onError = options.onError;
-    this.#onJobCorrupt = options.onJobCorrupt;
   }
 
   /** Start the recurring sweep. Disabled when the interval is non-positive. */
@@ -60,14 +57,7 @@ export class StalledRecoverySweep {
       const recovered = await this.#scheduler.recover(this.#batchSize);
       if (recovered.length === 0) return;
 
-      const recoveredJobIds = recovered.filter((id) => !id.startsWith("corrupt:"));
-      for (const id of recovered) {
-        if (id.startsWith("corrupt:")) {
-          this.#onJobCorrupt(id.slice("corrupt:".length), "invalid-json");
-        }
-      }
-      if (recoveredJobIds.length === 0) return;
-      this.#onJobRecovered(recoveredJobIds);
+      this.#onJobRecovered(recovered);
     } catch (err) {
       this.#onError("recover", err);
     }

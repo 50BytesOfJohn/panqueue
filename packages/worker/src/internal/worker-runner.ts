@@ -81,7 +81,6 @@ export class WorkerRunner {
       leaseMs: this.#leaseMs,
       lockRenewMs: this.#lockRenewMs,
       onError: (context, error) => this.#emitError(context, error),
-      onJobCorrupt: (jobId, reason) => this.#emitJobCorrupt(jobId, reason),
     });
     this.#recoverySweep = new StalledRecoverySweep({
       scheduler: this.#scheduler,
@@ -90,7 +89,6 @@ export class WorkerRunner {
       isActive: () => this.#state === "running",
       onJobRecovered: (jobIds) => this.#emitJobRecovered(jobIds),
       onError: (context, error) => this.#emitError(context, error),
-      onJobCorrupt: (jobId, reason) => this.#emitJobCorrupt(jobId, reason),
     });
   }
 
@@ -223,13 +221,7 @@ export class WorkerRunner {
 
       let jobData: JobData | null;
       try {
-        const claimResult = await this.#scheduler.claim(this.#leaseMs);
-        if (claimResult?.status === "corrupt") {
-          this.#emitJobCorrupt(claimResult.jobId, claimResult.reason);
-          this.#semaphore.release();
-          continue;
-        }
-        jobData = claimResult;
+        jobData = await this.#scheduler.claim(this.#leaseMs);
       } catch (err) {
         this.#semaphore.release();
         this.#emitError("claim", err);
@@ -288,11 +280,6 @@ export class WorkerRunner {
           }
           return;
         }
-        if (result === "corrupt") {
-          this.#emitJobCorrupt(jobData.id, "invalid-json");
-          this.#emitJobAckError(jobData, "complete", result);
-          return;
-        }
         this.#emitJobAckError(jobData, "complete", result);
         return;
       } catch (err) {
@@ -319,11 +306,6 @@ export class WorkerRunner {
         } catch {
           /* swallow */
         }
-        return;
-      }
-      if (result === "corrupt") {
-        this.#emitJobCorrupt(jobData.id, "invalid-json");
-        this.#emitJobAckError(jobData, "fail", result);
         return;
       }
       this.#emitJobAckError(jobData, "fail", result);
@@ -407,18 +389,6 @@ export class WorkerRunner {
     } catch {
       /* swallow */
     }
-  }
-
-  #emitJobCorrupt(jobId: string, reason: string): void {
-    if (this.#events.onJobCorrupt) {
-      try {
-        this.#events.onJobCorrupt(jobId, reason);
-      } catch {
-        /* swallow */
-      }
-      return;
-    }
-    this.#emitError(`corrupt:${jobId}`, new Error(reason));
   }
 
   #emitJobAckError(job: JobData, phase: "complete" | "fail", error: unknown): void {

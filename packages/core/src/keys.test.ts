@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { queueKey, queueKeys } from "./keys.js";
+import { jobKey, queueHashTag, queueKey, queueKeys } from "./keys.js";
 
 describe("queueKey", () => {
   it("hash-tags the queue id so all suffixes share one slot", () => {
@@ -9,6 +9,24 @@ describe("queueKey", () => {
 
     // Assert
     expect(key).toBe("{q:emails}:waiting");
+  });
+});
+
+describe("queueHashTag", () => {
+  it("returns the bare hash-tag prefix shared by every key", () => {
+    // Arrange / Act / Assert
+    expect(queueHashTag("emails")).toBe("{q:emails}");
+  });
+});
+
+describe("jobKey", () => {
+  it("builds a per-job key inside the queue's hash slot", () => {
+    // Arrange / Act
+    const key = jobKey("emails", "abc123");
+
+    // Assert — same hash tag as the rest of the bundle, distinct suffix.
+    expect(key).toBe("{q:emails}:job:abc123");
+    expect(key.startsWith(`${queueHashTag("emails")}:`)).toBe(true);
   });
 });
 
@@ -24,9 +42,6 @@ describe("queueKeys", () => {
       completed: "{q:emails}:completed",
       failed: "{q:emails}:failed",
       delayed: "{q:emails}:delayed",
-      corrupt: "{q:emails}:corrupt",
-      corruptData: "{q:emails}:corrupt:data",
-      jobs: "{q:emails}:jobs",
       meta: "{q:emails}:meta",
       notify: "{q:emails}:notify",
     });

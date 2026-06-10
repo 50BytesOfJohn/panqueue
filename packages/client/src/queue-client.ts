@@ -3,9 +3,9 @@ import {
   assertJsonSerializable,
   type ConnectionOptions,
   generateJobId,
-  type JobData,
   type JobOptions,
   type QueueMap,
+  queueHashTag,
   queueKeys,
 } from "@panqueue/core";
 
@@ -95,23 +95,16 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
 
     const jobId = generateJobId();
 
-    const jobData: Omit<JobData<TQueues[K]>, "createdAt"> = {
-      id: jobId,
-      queueId,
-      data,
-      status: "waiting",
-      runs: 0,
-      failures: 0,
-      stalls: 0,
-      maxRetries: options?.retries ?? 0,
-      maxStalls: options?.maxStalls ?? 5,
-    };
-
-    const serialized = JSON.stringify(jobData);
-
     await this.#redis.connect();
 
-    await this.#redis.client.enqueue(queueKeys(queueId), { jobId, serialized });
+    await this.#redis.client.enqueue(queueKeys(queueId), {
+      jobId,
+      payload: JSON.stringify(data),
+      queueId,
+      maxRetries: options?.retries ?? 0,
+      maxStalls: options?.maxStalls ?? 5,
+      tag: queueHashTag(queueId),
+    });
 
     return jobId;
   }

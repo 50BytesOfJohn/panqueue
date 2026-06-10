@@ -11,6 +11,8 @@ export interface RequeueActiveArgs {
   lockToken: string;
   /** lastRequeueReason text written on the job hash. */
   reason: string;
+  /** The queue's hash-tag prefix, used to build the per-job key in Lua. */
+  tag: string;
 }
 
 type RequeueActiveScriptArguments = [keys: QueueKeys, args: RequeueActiveArgs];
@@ -23,72 +25,52 @@ export type RequeueActiveScript = PanqueueRedisScript<RequeueActiveScriptArgumen
  *
  * Force shutdown is an ownership handoff, not a handler failure or stall.
  *
- * 1. HGET the job hash; if missing, return "missing".
+ * 1. If the job hash is gone, return "missing".
  * 2. If the stored lockToken does not match the caller's, return "stale"
  *    (recovery already grabbed it — nothing to requeue).
  * 3. ZREM the job from the active ZSET. Clear lockToken/leaseDeadline.
  * 4. Record lastRequeuedAt/lastRequeueReason, mark waiting, LPUSH, PUBLISH.
  *
- * Returns "waiting", "stale", "missing", or "corrupt".
+ * Returns "waiting", "stale", or "missing".
  */
 export const REQUEUE_ACTIVE_SCRIPT: RequeueActiveScript = defineScript({
-  NUMBER_OF_KEYS: 6,
+  NUMBER_OF_KEYS: 3,
   SCRIPT: `
-local raw = redis.call('HGET', KEYS[3], ARGV[1])
-if not raw then
+local jobKey = ARGV[4] .. ':job:' .. ARGV[1]
+if redis.call('EXISTS', jobKey) == 0 then
   return 'missing'
 end
 
-local ok, job = pcall(cjson.decode, raw)
-local t = redis.call('TIME')
-local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
-
-if not ok then
-  redis.call('ZADD', KEYS[5], now, ARGV[1])
-  redis.call('HSET', KEYS[6], ARGV[1], cjson.encode({
-    jobId = ARGV[1],
-    reason = 'invalid-json',
-    detectedAt = now,
-    raw = string.sub(raw, 1, 4096)
-  }))
-  return 'corrupt'
-end
-
-if job['lockToken'] ~= ARGV[2] then
+if redis.call('HGET', jobKey, 'lockToken') ~= ARGV[2] then
   return 'stale'
 end
 
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+
 redis.call('ZREM', KEYS[1], ARGV[1])
 
-job['lockToken'] = nil
-job['leaseDeadline'] = nil
-job['lastRequeuedAt'] = now
-job['lastRequeueReason'] = ARGV[3]
-job['status'] = 'waiting'
+redis.call('HSET', jobKey,
+  'lastRequeuedAt', now,
+  'lastRequeueReason', ARGV[3],
+  'status', 'waiting')
+redis.call('HDEL', jobKey, 'lockToken', 'leaseDeadline')
 
-redis.call('HSET', KEYS[3], ARGV[1], cjson.encode(job))
 redis.call('LPUSH', KEYS[2], ARGV[1])
-redis.call('PUBLISH', KEYS[4], ARGV[1])
+redis.call('PUBLISH', KEYS[3], ARGV[1])
 return 'waiting'
 `,
   /**
-   * KEYS[1..6] = active, waiting, jobs, notify, corrupt, corruptData;
-   * ARGV[1..3] = jobId, lockToken, reason.
+   * KEYS[1..3] = active, waiting, notify;
+   * ARGV[1..4] = jobId, lockToken, reason, tag.
    *
    * @param parser - command parser (injected by node-redis)
    * @param keys   - the queue's key bundle
    * @param args   - {@link RequeueActiveArgs}
    */
   parseCommand(parser: CommandParser, keys: QueueKeys, args: RequeueActiveArgs): void {
-    parser.pushKeys([
-      keys.active,
-      keys.waiting,
-      keys.jobs,
-      keys.notify,
-      keys.corrupt,
-      keys.corruptData,
-    ]);
-    parser.push(args.jobId, args.lockToken, args.reason);
+    parser.pushKeys([keys.active, keys.waiting, keys.notify]);
+    parser.push(args.jobId, args.lockToken, args.reason, args.tag);
   },
   transformReply(reply: unknown): unknown {
     return reply;

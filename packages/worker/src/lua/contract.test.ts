@@ -27,12 +27,12 @@ const keys = queueKeys("t");
 
 /** Representative non-key args for each script (shape only; values unused). */
 const ARGS = {
-  claimGlobal: { leaseMs: 1000 },
-  complete: { jobId: "j", lockToken: "tok" },
-  fail: { jobId: "j", error: "boom", lockToken: "tok" },
-  recover: { batchSize: 10, reason: "stalled" },
-  extendLock: { jobId: "j", lockToken: "tok", leaseMs: 1000 },
-  requeueActive: { jobId: "j", lockToken: "tok", reason: "shutdown" },
+  claimGlobal: { leaseMs: 1000, tag: "{q:t}" },
+  complete: { jobId: "j", lockToken: "tok", tag: "{q:t}" },
+  fail: { jobId: "j", error: "boom", lockToken: "tok", tag: "{q:t}" },
+  recover: { batchSize: 10, reason: "stalled", tag: "{q:t}" },
+  extendLock: { jobId: "j", lockToken: "tok", leaseMs: 1000, tag: "{q:t}" },
+  requeueActive: { jobId: "j", lockToken: "tok", reason: "shutdown", tag: "{q:t}" },
 } as const;
 
 describe("worker script KEYS contract", () => {

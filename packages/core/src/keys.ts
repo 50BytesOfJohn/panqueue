@@ -18,9 +18,14 @@ declare const keyBrand: unique symbol;
  */
 export type QueueKey<Role extends string> = string & { readonly [keyBrand]: Role };
 
+/** The hash-tag prefix shared by every key of a queue (e.g. `{q:emails}`). */
+export function queueHashTag(queueId: string): string {
+  return `{q:${queueId}}`;
+}
+
 /** Generate a Redis key for the given queue and suffix. */
 export function queueKey(queueId: string, suffix: string): string {
-  return `{q:${queueId}}:${suffix}`;
+  return `${queueHashTag(queueId)}:${suffix}`;
 }
 
 /** Waiting jobs list — FIFO queue of job IDs. */
@@ -43,24 +48,15 @@ export function failedKey(queueId: string): QueueKey<"failed"> {
   return queueKey(queueId, "failed") as QueueKey<"failed">;
 }
 
-/** Corrupt job index sorted set, scored by detection time. */
-export function corruptKey(queueId: string): QueueKey<"corrupt"> {
-  return queueKey(queueId, "corrupt") as QueueKey<"corrupt">;
-}
-
-/** Corrupt job forensic payload hash, keyed by job ID. */
-export function corruptDataKey(queueId: string): QueueKey<"corrupt:data"> {
-  return queueKey(queueId, "corrupt:data") as QueueKey<"corrupt:data">;
-}
-
 /** Delayed jobs sorted set — scored by scheduled timestamp. */
 export function delayedKey(queueId: string): QueueKey<"delayed"> {
   return queueKey(queueId, "delayed") as QueueKey<"delayed">;
 }
 
-/** Job data hash — stores serialized JobData by job ID. */
-export function jobsKey(queueId: string): QueueKey<"jobs"> {
-  return queueKey(queueId, "jobs") as QueueKey<"jobs">;
+/** Per-job hash — one hash per job, storing the opaque payload plus discrete
+ *  lifecycle fields. Shares the queue's hash tag so it lives in the same slot. */
+export function jobKey(queueId: string, jobId: string): QueueKey<"job"> {
+  return queueKey(queueId, `job:${jobId}`) as QueueKey<"job">;
 }
 
 /** Queue metadata hash (scope, concurrency settings, etc.). */
@@ -86,9 +82,6 @@ export interface QueueKeys {
   readonly completed: QueueKey<"completed">;
   readonly failed: QueueKey<"failed">;
   readonly delayed: QueueKey<"delayed">;
-  readonly corrupt: QueueKey<"corrupt">;
-  readonly corruptData: QueueKey<"corrupt:data">;
-  readonly jobs: QueueKey<"jobs">;
   readonly meta: QueueKey<"meta">;
   readonly notify: QueueKey<"notify">;
 }
@@ -101,9 +94,6 @@ export function queueKeys(queueId: string): QueueKeys {
     completed: completedKey(queueId),
     failed: failedKey(queueId),
     delayed: delayedKey(queueId),
-    corrupt: corruptKey(queueId),
-    corruptData: corruptDataKey(queueId),
-    jobs: jobsKey(queueId),
     meta: metaKey(queueId),
     notify: notifyKey(queueId),
   };

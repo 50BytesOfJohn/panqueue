@@ -6,7 +6,6 @@ export interface LeaseRenewerOptions {
   leaseMs: number;
   lockRenewMs: number;
   onError(context: string, error: unknown): void;
-  onJobCorrupt(jobId: string, reason: string): void;
 }
 
 /** Handle controlling a single claimed job's lease renewal. */
@@ -24,14 +23,12 @@ export class LeaseRenewer {
   readonly #leaseMs: number;
   readonly #lockRenewMs: number;
   readonly #onError: (context: string, error: unknown) => void;
-  readonly #onJobCorrupt: (jobId: string, reason: string) => void;
 
   constructor(options: LeaseRenewerOptions) {
     this.#scheduler = options.scheduler;
     this.#leaseMs = options.leaseMs;
     this.#lockRenewMs = options.lockRenewMs;
     this.#onError = options.onError;
-    this.#onJobCorrupt = options.onJobCorrupt;
   }
 
   /**
@@ -51,9 +48,6 @@ export class LeaseRenewer {
       try {
         const ok = await this.#scheduler.extendLock(jobId, this.#leaseMs, lockToken);
         if (ok !== "extended") {
-          if (ok === "corrupt") {
-            this.#onJobCorrupt(jobId, "invalid-json");
-          }
           this.#onError(
             `lease-lost:${jobId}`,
             new Error(

@@ -26,8 +26,8 @@ type TestQueues = {
 
 const makeClient = () => new QueueClient<TestQueues>({ connection: "redis://localhost:6379" });
 
-/** The serialized JobData sent to Redis by the most recent enqueue call. */
-const lastSentJob = () => JSON.parse(enqueueMock.mock.calls[0][1].serialized);
+/** The non-key enqueue args sent to Redis by the most recent enqueue call. */
+const lastSentArgs = () => enqueueMock.mock.calls[0][1];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -65,7 +65,7 @@ describe("QueueClient.enqueue", () => {
     await client.enqueue("emails", { to: "a@b.com", subject: "Hi" });
 
     // Assert
-    expect(lastSentJob().maxRetries).toBe(0);
+    expect(lastSentArgs().maxRetries).toBe(0);
   });
 
   it("defaults maxStalls to 5", async () => {
@@ -76,7 +76,7 @@ describe("QueueClient.enqueue", () => {
     await client.enqueue("emails", { to: "a@b.com", subject: "Hi" });
 
     // Assert
-    expect(lastSentJob().maxStalls).toBe(5);
+    expect(lastSentArgs().maxStalls).toBe(5);
   });
 
   it("derives the Redis key bundle from the queue id", async () => {
@@ -104,7 +104,7 @@ describe("QueueClient.enqueue", () => {
     );
 
     // Assert
-    expect(lastSentJob().maxRetries).toBe(3);
+    expect(lastSentArgs().maxRetries).toBe(3);
   });
 
   it("uses the maxStalls option as maxStalls", async () => {
@@ -121,7 +121,21 @@ describe("QueueClient.enqueue", () => {
     );
 
     // Assert
-    expect(lastSentJob().maxStalls).toBe(9);
+    expect(lastSentArgs().maxStalls).toBe(9);
+  });
+
+  it("sends the payload as the verbatim JSON of the data", async () => {
+    // Arrange
+    const client = makeClient();
+    const data = { to: "a@b.com", subject: "Hi" };
+
+    // Act
+    await client.enqueue("emails", data);
+
+    // Assert — opaque string, byte-identical to JSON.stringify; queueId/tag set.
+    expect(lastSentArgs().payload).toBe(JSON.stringify(data));
+    expect(lastSentArgs().queueId).toBe("emails");
+    expect(lastSentArgs().tag).toBe("{q:emails}");
   });
 
   it("connects lazily before sending", async () => {

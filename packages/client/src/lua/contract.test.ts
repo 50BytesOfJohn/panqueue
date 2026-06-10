@@ -24,7 +24,14 @@ describe("enqueue script KEYS contract", () => {
     const bundle = new Set<unknown>(Object.values(keys));
 
     // Act
-    ENQUEUE_SCRIPT.parseCommand(parser, keys, { jobId: "j", serialized: "{}" });
+    ENQUEUE_SCRIPT.parseCommand(parser, keys, {
+      jobId: "j",
+      payload: "{}",
+      queueId: "t",
+      maxRetries: 0,
+      maxStalls: 5,
+      tag: "{q:t}",
+    });
 
     // Assert
     expect(pushed).toHaveLength(ENQUEUE_SCRIPT.NUMBER_OF_KEYS as number);

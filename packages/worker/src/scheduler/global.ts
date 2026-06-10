@@ -1,4 +1,4 @@
-import { type JobData, type JsonSerializable } from "@panqueue/core";
+import { deserializeJobHash, type JsonSerializable } from "@panqueue/core";
 
 import { BaseJobScheduler, type ClaimResult } from "./base.js";
 
@@ -13,43 +13,12 @@ export class GlobalJobScheduler<
 > extends BaseJobScheduler<T> {
   /** Claim the next job from the waiting list using an atomic Lua script. */
   async claim(leaseMs: number): Promise<ClaimResult<T>> {
-    const result = await this.client.claimGlobal(this.keys, { leaseMs });
+    const result = await this.client.claimGlobal(this.keys, { leaseMs, tag: this.tag });
 
     if (!result) return null;
-    if (typeof result !== "string") {
+    if (!Array.isArray(result)) {
       throw new Error(`Unexpected claim result: ${String(result)}`);
     }
-    if (result.startsWith("corrupt:")) {
-      return {
-        status: "corrupt",
-        jobId: result.slice("corrupt:".length),
-        reason: "invalid-json",
-      };
-    }
-    const parsed: unknown = JSON.parse(result);
-    return assertJobData<T>(parsed);
+    return deserializeJobHash<T>(result as string[]);
   }
-}
-
-function assertJobData<T extends JsonSerializable>(value: unknown): JobData<T> {
-  if (!isClaimedJobData<T>(value)) {
-    throw new Error("Claimed job payload is missing required active fields");
-  }
-
-  return value;
-}
-
-function isClaimedJobData<T extends JsonSerializable>(value: unknown): value is JobData<T> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "id" in value &&
-    typeof value.id === "string" &&
-    "queueId" in value &&
-    typeof value.queueId === "string" &&
-    "status" in value &&
-    value.status === "active" &&
-    "lockToken" in value &&
-    typeof value.lockToken === "string"
-  );
 }

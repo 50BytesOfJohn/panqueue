@@ -21,8 +21,6 @@ export interface WorkerEventHandlers<T extends JsonSerializable = JsonSerializab
   onJobRetry?(job: JobData<T>, error: string): void;
   /** Called when a job's lease was lost (recovery requeued it under us). */
   onJobStale?(job: JobData<T>, phase: "complete" | "fail"): void;
-  /** Called when Redis job data is unreadable and has been quarantined. */
-  onJobCorrupt?(jobId: string, reason: string): void;
   /** Called when a complete/fail acknowledgement fails or returns unusable state. */
   onJobAckError?(job: JobData<T>, phase: "complete" | "fail", error: unknown): void;
   /** Called when stalled jobs are recovered by this runner's sweep. */
