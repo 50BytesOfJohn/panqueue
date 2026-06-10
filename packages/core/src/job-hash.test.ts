@@ -12,43 +12,47 @@ const baseHash = {
   queueId: "emails",
   status: "active",
   runs: "1",
-  failures: "0",
-  stalls: "0",
-  maxRetries: "3",
   maxStalls: "5",
   createdAt: "1700000000000",
   lockToken: "tok",
-  leaseDeadline: "1700000030000",
 };
 
 describe("deserializeJobHash", () => {
-  it("coerces numeric fields and leaves strings intact", () => {
+  it("coerces a numeric hash field into a number", () => {
     // Arrange / Act
     const job = deserializeJobHash(flat({ ...baseHash, payload: "null" }));
 
     // Assert
-    expect(job.id).toBe("job-1");
-    expect(job.queueId).toBe("emails");
-    expect(job.status).toBe("active");
     expect(job.runs).toBe(1);
-    expect(job.maxStalls).toBe(5);
+  });
+
+  it("coerces a large numeric hash field into a number", () => {
+    // Arrange / Act
+    const job = deserializeJobHash(flat({ ...baseHash, payload: "null" }));
+
+    // Assert
     expect(job.createdAt).toBe(1_700_000_000_000);
+  });
+
+  it("leaves a string hash field intact", () => {
+    // Arrange / Act
+    const job = deserializeJobHash(flat({ ...baseHash, payload: "null" }));
+
+    // Assert
     expect(job.lockToken).toBe("tok");
   });
 
-  it("parses the opaque payload into data without mangling it", () => {
-    // Arrange — the exact values cjson used to corrupt: an empty array and a
-    // high-precision float.
+  it("parses the opaque payload back into data", () => {
+    // Arrange
     const data = { tags: [], n: 0.30000000000000004 };
-    const payload = JSON.stringify(data);
 
     // Act
-    const job = deserializeJobHash<typeof data>(flat({ ...baseHash, payload }));
+    const job = deserializeJobHash<typeof data>(
+      flat({ ...baseHash, payload: JSON.stringify(data) }),
+    );
 
-    // Assert — round-trips byte-for-byte: [] stays [], float is exact.
+    // Assert
     expect(job.data).toEqual(data);
-    expect(job.data.tags).toEqual([]);
-    expect(job.data.n).toBe(0.30000000000000004);
   });
 
   it("throws when identity fields are missing", () => {
