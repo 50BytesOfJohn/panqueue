@@ -3,6 +3,40 @@
 This file records rationale and dated decisions. It is not the source of truth
 for behavior; `SPEC.md` is authoritative.
 
+## 2026-06-11: Event Payload Refinement (timing, no attempt copies, hook-failure reporting)
+
+### Decision
+
+- `onJobCompleted` and `onJobError` carry a `timing` object:
+  `{ startedAt, durationMs }`, measured by the worker that ran the handler
+  (`durationMs` via a monotonic clock). No other event carries timing:
+  `onJobRetry`/`onJobFailed` with `cause: "stalled"` fire on the sweeping
+  worker, which never ran the handler and cannot know its duration. Timing is
+  grouped in an object (not a root `durationMs`) so future fields
+  (e.g. queue wait time) extend it without widening the event root.
+- The `attempt`/`attempts` convenience fields are removed from
+  `onJobError`/`onJobRetry`/`onJobFailed`. They duplicated `job.runs` exactly;
+  having both invited confusion. Derived values that are annoying to recompute
+  (`retriesLeft`, `willRetry`) stay.
+- A throwing or rejecting event handler is no longer silently swallowed: the
+  failure is reported to `onWorkerError` with scope `events:<handlerName>`.
+  Failures thrown by `onWorkerError` itself are dropped (no recursion). Job
+  state is never affected either way.
+- No `workerId` field on events (YAGNI). Events are worker-local, so users can
+  close over their own identifier; a durable worker identity (stamped on claim,
+  reported on stall events) is the version worth building if demand appears.
+
+### Why
+
+- Without duration, users must record `onJobStarted` timestamps themselves,
+  which is awkward under concurrency. Completed + error together cover every
+  handler run, so the two events suffice for full duration coverage.
+- `event.attempts` vs `event.job.runs` returning the same number under
+  different names is the kind of API that generates confused issues.
+- "Silently ignored" hook failures made debugging dead observability hooks
+  needlessly hard; routing them to `onWorkerError` keeps the
+  never-affects-jobs guarantee while restoring visibility.
+
 ## 2026-06-10: Worker Event Surface Redesign
 
 ### Decision

@@ -15,6 +15,19 @@ export type JobFailureCause = "handler" | "stalled";
 /** Phase during which a terminal acknowledgement was attempted. */
 export type JobAckPhase = "complete" | "fail";
 
+/**
+ * Handler-execution timing, measured by the worker that ran the handler.
+ * Present only on events that mark the end of a handler run; durable
+ * transitions observed by other workers (e.g. stall recoveries) carry no
+ * timing because the sweeping worker never ran the handler.
+ */
+export interface JobTiming {
+  /** Unix timestamp (ms) when the handler started. */
+  startedAt: number;
+  /** Handler execution time in ms, measured with a monotonic clock. */
+  durationMs: number;
+}
+
 /** Payload for {@link WorkerEventHandlers.onJobStarted}. */
 export interface JobStartedEvent<T extends JsonSerializable = JsonSerializable> {
   job: JobData<T>;
@@ -23,6 +36,8 @@ export interface JobStartedEvent<T extends JsonSerializable = JsonSerializable> 
 /** Payload for {@link WorkerEventHandlers.onJobCompleted}. */
 export interface JobCompletedEvent<T extends JsonSerializable = JsonSerializable> {
   job: JobData<T>;
+  /** Timing of the handler run that completed the job. */
+  timing: JobTiming;
 }
 
 /** Payload for {@link WorkerEventHandlers.onJobError}. */
@@ -30,10 +45,10 @@ export interface JobErrorEvent<T extends JsonSerializable = JsonSerializable> {
   job: JobData<T>;
   /** The value thrown by the handler, with its stack intact. */
   error: unknown;
-  /** 1-based number of the attempt that just threw. */
-  attempt: number;
   /** True when the job is requeued for retry; false when this failure is terminal. */
   willRetry: boolean;
+  /** Timing of the handler run that threw. */
+  timing: JobTiming;
 }
 
 /** Payload for {@link WorkerEventHandlers.onJobRetry}. */
@@ -44,8 +59,6 @@ export interface JobRetryEvent<T extends JsonSerializable = JsonSerializable> {
    * carrying the recovery reason for cause `"stalled"`.
    */
   error: unknown;
-  /** 1-based number of the attempt that just failed or stalled. */
-  attempt: number;
   /**
    * Remaining attempts of the same cause before the job fails terminally:
    * handler retries for `"handler"`, stall recoveries for `"stalled"`.
@@ -62,8 +75,6 @@ export interface JobFailedEvent<T extends JsonSerializable = JsonSerializable> {
    * carrying the recovery reason for cause `"stalled"`.
    */
   error: unknown;
-  /** Total claims the job consumed before failing terminally. */
-  attempts: number;
   cause: JobFailureCause;
 }
 
@@ -97,8 +108,10 @@ export interface StateChangeEvent {
  * Event handlers for observability and logging.
  *
  * All handlers are local to the worker process: they fire on the worker
- * that observed the transition, not globally across the queue. Thrown
- * errors inside handlers are swallowed and never affect job processing.
+ * that observed the transition, not globally across the queue. A throwing
+ * or rejecting handler never affects job processing: the failure is caught
+ * and reported to `onWorkerError` with scope `events:<handlerName>`.
+ * Failures thrown by `onWorkerError` itself are dropped.
  */
 export interface WorkerEventHandlers<T extends JsonSerializable = JsonSerializable> {
   /** Called when a claimed job begins processing. */
@@ -130,7 +143,11 @@ export interface WorkerEventHandlers<T extends JsonSerializable = JsonSerializab
   onJobStale?(event: JobStaleEvent<T>): void;
   /** Called when a complete/fail acknowledgement fails or returns unusable state. */
   onJobAckError?(event: JobAckErrorEvent<T>): void;
-  /** Called on internal worker errors (claiming, lease renewal, recovery sweeps). */
+  /**
+   * Called on internal worker errors (claiming, lease renewal, recovery
+   * sweeps) and on failures thrown by other event handlers
+   * (scope `events:<handlerName>`).
+   */
   onWorkerError?(event: WorkerErrorEvent): void;
   /** Called on every lifecycle state transition for this runner. */
   onStateChange?(event: StateChangeEvent): void;

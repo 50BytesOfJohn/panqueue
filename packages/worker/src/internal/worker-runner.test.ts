@@ -7,6 +7,7 @@ import type {
   JobRetryEvent,
   JobStaleEvent,
   Processor,
+  WorkerErrorEvent,
   WorkerEventHandlers,
 } from "../define-worker.js";
 import type { PanqueueWorkerClient } from "../redis-connection.js";
@@ -132,6 +133,39 @@ describe("WorkerRunner job events", () => {
     expect(events[0].job.lockToken).toBeUndefined();
   });
 
+  it("includes handler timing on onJobCompleted", async () => {
+    // Arrange
+    const before = Date.now();
+    const events: JobCompletedEvent[] = [];
+    const runner = makeRunner({ events: { onJobCompleted: (e) => events.push(e) } });
+
+    // Act
+    runner.start();
+
+    // Assert
+    await captured(events);
+    expect(events[0].timing.startedAt).toBeGreaterThanOrEqual(before);
+    expect(events[0].timing.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("includes handler timing on onJobError", async () => {
+    // Arrange
+    const events: JobErrorEvent[] = [];
+    const runner = makeRunner({
+      processor: async () => {
+        throw new Error("boom");
+      },
+      events: { onJobError: (e) => events.push(e) },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert
+    await captured(events);
+    expect(events[0].timing.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
   it("passes the original thrown error to onJobError", async () => {
     // Arrange
     const boom = new Error("boom");
@@ -222,10 +256,9 @@ describe("WorkerRunner job events", () => {
     // Assert — maxRetries 2, first failure recorded: one retry left.
     await captured(events);
     expect(events[0]).toMatchObject({
-      attempt: 1,
       retriesLeft: 1,
       cause: "handler",
-      job: { failures: 1, status: "waiting" },
+      job: { runs: 1, failures: 1, status: "waiting" },
     });
   });
 
@@ -246,9 +279,8 @@ describe("WorkerRunner job events", () => {
     // Assert
     await captured(events);
     expect(events[0]).toMatchObject({
-      attempts: 1,
       cause: "handler",
-      job: { status: "failed" },
+      job: { runs: 1, status: "failed" },
     });
   });
 
@@ -295,6 +327,72 @@ describe("WorkerRunner job events", () => {
   });
 });
 
+describe("WorkerRunner event handler failures", () => {
+  it("reports a throwing event handler to onWorkerError with an events scope", async () => {
+    // Arrange
+    const errors: WorkerErrorEvent[] = [];
+    const runner = makeRunner({
+      events: {
+        onJobCompleted: () => {
+          throw new Error("hook boom");
+        },
+        onWorkerError: (e) => errors.push(e),
+      },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert
+    await captured(errors);
+    expect(errors[0]).toMatchObject({
+      scope: "events:onJobCompleted",
+      error: new Error("hook boom"),
+    });
+  });
+
+  it("reports a rejecting async event handler to onWorkerError", async () => {
+    // Arrange
+    const errors: WorkerErrorEvent[] = [];
+    const runner = makeRunner({
+      events: {
+        onJobCompleted: () => Promise.reject(new Error("async hook boom")) as unknown as void,
+        onWorkerError: (e) => errors.push(e),
+      },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert
+    await captured(errors);
+    expect(errors[0].scope).toBe("events:onJobCompleted");
+  });
+
+  it("drops failures thrown by onWorkerError itself", async () => {
+    // Arrange
+    const completed: JobCompletedEvent[] = [];
+    const runner = makeRunner({
+      events: {
+        onJobStarted: () => {
+          throw new Error("hook boom");
+        },
+        onWorkerError: () => {
+          throw new Error("reporter boom");
+        },
+        onJobCompleted: (e) => completed.push(e),
+      },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert — the job still completes despite both handlers throwing.
+    await captured(completed);
+    expect(completed[0].job.status).toBe("completed");
+  });
+});
+
 describe("WorkerRunner recovery sweep events", () => {
   it("emits onJobRetry with stalled cause for a requeued stalled job", async () => {
     // Arrange
@@ -310,7 +408,7 @@ describe("WorkerRunner recovery sweep events", () => {
 
     // Assert — maxStalls 5, one stall recorded: four recoveries left.
     await captured(events);
-    expect(events[0]).toMatchObject({ cause: "stalled", attempt: 1, retriesLeft: 4 });
+    expect(events[0]).toMatchObject({ cause: "stalled", retriesLeft: 4, job: { runs: 1 } });
   });
 
   it("emits onJobFailed with stalled cause for a terminally stalled job", async () => {
@@ -327,6 +425,6 @@ describe("WorkerRunner recovery sweep events", () => {
 
     // Assert
     await captured(events);
-    expect(events[0]).toMatchObject({ cause: "stalled", attempts: 3 });
+    expect(events[0]).toMatchObject({ cause: "stalled", job: { runs: 3 } });
   });
 });

@@ -20,8 +20,8 @@ export const emailWorker = defineWorker(
   },
   {
     events: {
-      onJobFailed({ job, error, attempts }) {
-        console.error(`email ${job.id} failed permanently after ${attempts} attempts`, error);
+      onJobFailed({ job, error }) {
+        console.error(`email ${job.id} failed permanently after ${job.runs} runs`, error);
       },
     },
   },
@@ -81,10 +81,10 @@ duplicating reporting across the retry and failed handlers:
 
     const worker = defineWorker(pq, "email", processEmail, {
       events: {
-        onJobError({ job, error, attempt, willRetry }) {
+        onJobError({ job, error, willRetry, timing }) {
           Sentry.captureException(error, {
             tags: { queue: job.queueId, willRetry },
-            contexts: { job: { id: job.id, attempt } },
+            contexts: { job: { id: job.id, runs: job.runs, durationMs: timing.durationMs } },
           });
         },
       },
@@ -103,21 +103,21 @@ duplicating reporting across the retry and failed handlers:
 
     const worker = defineWorker(pq, "email", processEmail, {
       events: {
-        onJobError({ job, error, attempt, willRetry }) {
+        onJobError({ job, error, willRetry }) {
           // PostHog error tracking: captured as an $exception event
           // with the full stack trace.
           posthog.captureException(error, "worker", {
             queue: job.queueId,
             jobId: job.id,
-            attempt,
+            runs: job.runs,
             willRetry,
           });
         },
-        onJobCompleted({ job }) {
+        onJobCompleted({ job, timing }) {
           posthog.capture({
             distinctId: "worker",
             event: "job_completed",
-            properties: { queue: job.queueId, jobId: job.id },
+            properties: { queue: job.queueId, jobId: job.id, durationMs: timing.durationMs },
           });
         },
       },
@@ -137,14 +137,14 @@ duplicating reporting across the retry and failed handlers:
         onJobStarted({ job }) {
           log.info({ jobId: job.id, queue: job.queueId }, "job started");
         },
-        onJobCompleted({ job }) {
-          log.info({ jobId: job.id }, "job completed");
+        onJobCompleted({ job, timing }) {
+          log.info({ jobId: job.id, durationMs: timing.durationMs }, "job completed");
         },
-        onJobRetry({ job, attempt, retriesLeft, cause }) {
-          log.warn({ jobId: job.id, attempt, retriesLeft, cause }, "job will retry");
+        onJobRetry({ job, retriesLeft, cause }) {
+          log.warn({ jobId: job.id, runs: job.runs, retriesLeft, cause }, "job will retry");
         },
-        onJobFailed({ job, error, attempts, cause }) {
-          log.error({ jobId: job.id, attempts, cause, err: error }, "job failed permanently");
+        onJobFailed({ job, error, cause }) {
+          log.error({ jobId: job.id, runs: job.runs, cause, err: error }, "job failed permanently");
         },
         onWorkerError({ scope, error }) {
           log.error({ scope, err: error }, "worker error");
@@ -160,13 +160,34 @@ Panqueue is intentionally not a metrics store — finished jobs are retained onl
 for operational inspection. Forwarding events to your observability stack is
 the supported way to track failures, completions, and retries over time.
 
+## Handler timing
+
+`onJobCompleted` and `onJobError` carry a `timing` object measured by the
+worker that ran the handler:
+
+```ts
+timing: {
+  startedAt: number; // Unix timestamp (ms) when the handler started
+  durationMs: number; // handler execution time, monotonic-clock measured
+}
+```
+
+Together these two events cover every handler run — `onJobCompleted` for
+successes, `onJobError` for every throw — so you never need to record
+`onJobStarted` timestamps yourself to compute durations, even with
+concurrency. `onJobRetry` and `onJobFailed` carry no timing on purpose: with
+`cause: "stalled"` they fire on the sweeping worker, which never ran the
+handler and cannot know how long it took.
+
 ## Best practices
 
 - **Alert on `onJobFailed`, report on `onJobError`, log on `onJobRetry`.**
   Each event has one job; you rarely need the same side effect in two of them.
-- **Handlers must not throw — and if they do, it's swallowed.** Event handlers
-  can never affect job processing: a throwing handler is silently ignored. Do
-  not put logic in them that must succeed.
+- **Handler failures can never break jobs.** If an event handler throws or
+  rejects, Panqueue catches it and never changes job state. The failure is
+  reported to `onWorkerError` with scope `events:<handlerName>`, so register
+  `onWorkerError` for full visibility into hook failures. Do not put logic in
+  event handlers that must succeed.
 - **Keep handlers fast.** They run synchronously on the job-processing path.
   Fire-and-forget async work (an HTTP call to your APM) is fine; blocking work
   is not.
@@ -222,11 +243,16 @@ Fires after a job is claimed, immediately before the processor runs.
 ### onJobCompleted
 
 ```ts
-onJobCompleted?(event: { job: JobData<T> }): void;
+onJobCompleted?(event: {
+  job: JobData<T>;
+  timing: { startedAt: number; durationMs: number };
+}): void;
 ```
 
 Fires after the success is durably acknowledged in Redis. `job.status` is
-`"completed"` and the lease fields are cleared.
+`"completed"` and the lease fields are cleared. `timing` describes the handler
+run: `startedAt` is a Unix timestamp (ms) and `durationMs` is the handler's
+execution time, measured with a monotonic clock.
 
 ### onJobError
 
@@ -234,15 +260,15 @@ Fires after the success is durably acknowledged in Redis. `job.status` is
 onJobError?(event: {
   job: JobData<T>;
   error: unknown; // the original thrown value, stack intact
-  attempt: number; // 1-based attempt that just threw
   willRetry: boolean;
+  timing: { startedAt: number; durationMs: number };
 }): void;
 ```
 
 Fires on every handler throw, before the matching `onJobRetry` or
 `onJobFailed`. Does not fire for stalls — only your code throwing. Only the
 error message is persisted to Redis; the full object (and stack) exists only
-here, in-process.
+here, in-process. `timing` covers the handler run that threw.
 
 ### onJobRetry
 
@@ -250,7 +276,6 @@ here, in-process.
 onJobRetry?(event: {
   job: JobData<T>;
   error: unknown;
-  attempt: number; // 1-based attempt that just failed or stalled
   retriesLeft: number;
   cause: "handler" | "stalled";
 }): void;
@@ -259,7 +284,8 @@ onJobRetry?(event: {
 Fires after the failed attempt is durably recorded and the job is back in the
 waiting queue — before the retry actually runs. `retriesLeft` counts remaining
 attempts of the same cause: handler retries for `"handler"`, stall recoveries
-for `"stalled"`.
+for `"stalled"`. The job's own counters carry the history: `job.runs` (claims),
+`job.failures`, and `job.stalls`.
 
 ### onJobFailed
 
@@ -267,14 +293,14 @@ for `"stalled"`.
 onJobFailed?(event: {
   job: JobData<T>;
   error: unknown;
-  attempts: number; // total claims the job consumed
   cause: "handler" | "stalled";
 }): void;
 ```
 
 Fires exactly once per job, when it fails terminally and is moved to the
 failed set (or deleted, per retention). The core hook for alerting and
-dead-letter handling.
+dead-letter handling. `job.runs` is the total number of claims the job
+consumed before failing.
 
 ### onJobStale
 
@@ -308,8 +334,10 @@ onWorkerError?(event: { scope: string; error: unknown }): void;
 ```
 
 Fires on internal worker errors that are not tied to a single job outcome:
-claim failures, lease-renewal failures, recovery-sweep failures. `scope` names
-the operation, e.g. `"claim"` or `"extend:<jobId>"`.
+claim failures, lease-renewal failures, recovery-sweep failures, and failures
+thrown by other event handlers. `scope` names the operation, e.g. `"claim"`,
+`"extend:<jobId>"`, or `"events:onJobCompleted"`. Failures thrown by
+`onWorkerError` itself are dropped.
 
 ### onStateChange
 

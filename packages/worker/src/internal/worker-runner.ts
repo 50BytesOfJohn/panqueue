@@ -253,12 +253,14 @@ export class WorkerRunner {
   }
 
   async #processJob(jobData: JobData, renewer: LeaseRenewal): Promise<void> {
-    this.#safeEmit(this.#events.onJobStarted, { job: jobData });
+    this.#safeEmit("onJobStarted", this.#events.onJobStarted, { job: jobData });
 
     const lockToken = jobData.lockToken ?? "";
 
     let handlerError: unknown;
     let handlerThrew = false;
+    const startedAt = Date.now();
+    const startedTick = performance.now();
     try {
       await this.#processor(jobData);
     } catch (err) {
@@ -267,21 +269,26 @@ export class WorkerRunner {
     } finally {
       renewer.stop();
     }
+    const timing = { startedAt, durationMs: Math.round(performance.now() - startedTick) };
 
     if (!handlerThrew) {
       try {
         const result = await this.#scheduler.complete(jobData.id, lockToken);
         if (result === "completed") {
-          this.#safeEmit(this.#events.onJobCompleted, {
+          this.#safeEmit("onJobCompleted", this.#events.onJobCompleted, {
             job: settledSnapshot(jobData, "completed"),
+            timing,
           });
           return;
         }
         if (result === "stale") {
-          this.#safeEmit(this.#events.onJobStale, { job: jobData, phase: "complete" });
+          this.#safeEmit("onJobStale", this.#events.onJobStale, {
+            job: jobData,
+            phase: "complete",
+          });
           return;
         }
-        this.#safeEmit(this.#events.onJobAckError, {
+        this.#safeEmit("onJobAckError", this.#events.onJobAckError, {
           job: jobData,
           phase: "complete",
           error: result,
@@ -289,13 +296,16 @@ export class WorkerRunner {
         return;
       } catch (err) {
         this.#emitWorkerError(`complete:${jobData.id}`, err);
-        this.#safeEmit(this.#events.onJobAckError, { job: jobData, phase: "complete", error: err });
+        this.#safeEmit("onJobAckError", this.#events.onJobAckError, {
+          job: jobData,
+          phase: "complete",
+          error: err,
+        });
         return;
       }
     }
 
     const message = handlerError instanceof Error ? handlerError.message : String(handlerError);
-    const attempt = jobData.runs;
     try {
       const result = await this.#scheduler.fail(jobData.id, message, lockToken);
       if (result === "waiting" || result === "failed") {
@@ -309,39 +319,45 @@ export class WorkerRunner {
           failedReason: message,
           lastError: message,
         };
-        this.#safeEmit(this.#events.onJobError, {
+        this.#safeEmit("onJobError", this.#events.onJobError, {
           job,
           error: handlerError,
-          attempt,
           willRetry: result === "waiting",
+          timing,
         });
         if (result === "waiting") {
-          this.#safeEmit(this.#events.onJobRetry, {
+          this.#safeEmit("onJobRetry", this.#events.onJobRetry, {
             job,
             error: handlerError,
-            attempt,
             retriesLeft: Math.max(0, job.maxRetries - failures),
             cause: "handler",
           });
         } else {
-          this.#safeEmit(this.#events.onJobFailed, {
+          this.#safeEmit("onJobFailed", this.#events.onJobFailed, {
             job,
             error: handlerError,
-            attempts: jobData.runs,
             cause: "handler",
           });
         }
         return;
       }
       if (result === "stale") {
-        this.#safeEmit(this.#events.onJobStale, { job: jobData, phase: "fail" });
+        this.#safeEmit("onJobStale", this.#events.onJobStale, { job: jobData, phase: "fail" });
         return;
       }
-      this.#safeEmit(this.#events.onJobAckError, { job: jobData, phase: "fail", error: result });
+      this.#safeEmit("onJobAckError", this.#events.onJobAckError, {
+        job: jobData,
+        phase: "fail",
+        error: result,
+      });
       return;
     } catch (err) {
       this.#emitWorkerError(`fail:${jobData.id}`, err);
-      this.#safeEmit(this.#events.onJobAckError, { job: jobData, phase: "fail", error: err });
+      this.#safeEmit("onJobAckError", this.#events.onJobAckError, {
+        job: jobData,
+        phase: "fail",
+        error: err,
+      });
       return;
     }
   }
@@ -354,18 +370,16 @@ export class WorkerRunner {
     for (const { outcome, job } of jobs) {
       const error = new Error(job.failedReason ?? "lease expired");
       if (outcome === "waiting") {
-        this.#safeEmit(this.#events.onJobRetry, {
+        this.#safeEmit("onJobRetry", this.#events.onJobRetry, {
           job,
           error,
-          attempt: job.runs,
           retriesLeft: Math.max(0, job.maxStalls - job.stalls),
           cause: "stalled",
         });
       } else {
-        this.#safeEmit(this.#events.onJobFailed, {
+        this.#safeEmit("onJobFailed", this.#events.onJobFailed, {
           job,
           error,
-          attempts: job.runs,
           cause: "stalled",
         });
       }
@@ -389,20 +403,30 @@ export class WorkerRunner {
   #transition(to: WorkerState): void {
     const from = this.#state;
     this.#state = to;
-    this.#safeEmit(this.#events.onStateChange, { from, to });
+    this.#safeEmit("onStateChange", this.#events.onStateChange, { from, to });
   }
 
   #emitWorkerError(scope: string, error: unknown): void {
-    this.#safeEmit(this.#events.onWorkerError, { scope, error });
+    this.#safeEmit("onWorkerError", this.#events.onWorkerError, { scope, error });
   }
 
-  /** Invoke a user-provided handler; handler errors must never affect jobs. */
-  #safeEmit<E>(handler: ((event: E) => void) | undefined, event: E): void {
+  /**
+   * Invoke a user-provided handler; handler errors must never affect jobs.
+   * Throws and rejections are reported to `onWorkerError` under an
+   * `events:<name>` scope — except failures from `onWorkerError` itself,
+   * which are dropped to avoid recursion.
+   */
+  #safeEmit<E>(name: string, handler: ((event: E) => void) | undefined, event: E): void {
     if (!handler) return;
+    const report = (err: unknown) => {
+      if (name === "onWorkerError") return;
+      this.#emitWorkerError(`events:${name}`, err);
+    };
     try {
-      handler(event);
-    } catch {
-      /* swallow */
+      const result = handler(event) as unknown;
+      if (result instanceof Promise) result.catch(report);
+    } catch (err) {
+      report(err);
     }
   }
 }

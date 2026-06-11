@@ -110,9 +110,9 @@ const emailWorker = defineWorker(
       onJobCompleted({ job }) {
         console.log(`sent ${job.data.subject}`);
       },
-      onJobFailed({ job, error, attempts }) {
+      onJobFailed({ job, error }) {
         // Terminal: all retries exhausted. Page someone, dead-letter, etc.
-        console.error(`job ${job.id} failed after ${attempts} attempts`, error);
+        console.error(`job ${job.id} failed after ${job.runs} runs`, error);
       },
     },
   },
@@ -164,11 +164,13 @@ distinct events — no attempt counting or `if` checks needed to tell them apart
 interface WorkerEventHandlers<T> {
   // Job lifecycle
   onJobStarted?(event: { job: JobData<T> }): void;
-  onJobCompleted?(event: { job: JobData<T> }): void;
+  onJobCompleted?(event: {
+    job: JobData<T>;
+    timing: { startedAt: number; durationMs: number };
+  }): void;
   onJobRetry?(event: {
     job: JobData<T>;
     error: unknown; // the original thrown value, stack intact
-    attempt: number; // 1-based attempt that just failed
     retriesLeft: number;
     cause: "handler" | "stalled";
   }): void;
@@ -177,7 +179,6 @@ interface WorkerEventHandlers<T> {
     // set (or was deleted by retention). Last chance to observe it.
     job: JobData<T>;
     error: unknown;
-    attempts: number;
     cause: "handler" | "stalled";
   }): void;
 
@@ -186,8 +187,8 @@ interface WorkerEventHandlers<T> {
   onJobError?(event: {
     job: JobData<T>;
     error: unknown;
-    attempt: number;
     willRetry: boolean;
+    timing: { startedAt: number; durationMs: number };
   }): void;
 
   // Plumbing

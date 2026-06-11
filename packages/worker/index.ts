@@ -9,6 +9,7 @@ export type {
   JobRetryEvent,
   JobStaleEvent,
   JobStartedEvent,
+  JobTiming,
   Processor,
   StateChangeEvent,
   WorkerDefinition,

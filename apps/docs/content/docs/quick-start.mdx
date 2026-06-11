@@ -73,8 +73,8 @@ const emailWorker = defineWorker(
       onJobCompleted({ job }) {
         console.log(`completed ${job.id}`);
       },
-      onJobFailed({ job, error, attempts }) {
-        console.error(`job ${job.id} failed after ${attempts} attempts`, error);
+      onJobFailed({ job, error }) {
+        console.error(`job ${job.id} failed after ${job.runs} runs`, error);
       },
     },
   },
