@@ -24,6 +24,7 @@ and shutdown — is handled by `@panqueue/worker`.
 
 - **Full type safety** for queue names and payloads, derived from a shared `PanqueueConfig`
 - **Lazy Redis connection** that opens on the first `enqueue` call
+- **Fail-fast error handling** — `enqueue` rejects with a typed error when Redis is unreachable instead of hanging
 - **Runtime payload validation** that rejects non-JSON-serializable values before they hit Redis
 - **Lightweight footprint** — one Redis connection per `QueueClient` instance
 
@@ -70,7 +71,8 @@ const client = new QueueClient<MyQueues>({
 
 `QueueClient` connects lazily. The first `enqueue` call opens the Redis socket;
 until then, no network resources are held. You can optionally call `connect()`
-at startup to verify connectivity before the first request:
+at startup to verify connectivity before the first request — it rejects with a
+`ClientConnectionError` when Redis is unreachable:
 
 ```ts
 await client.connect();
@@ -85,11 +87,68 @@ await using client = new QueueClient(pq);
 // client.disconnect() is called automatically on scope exit
 ```
 
+Clients are **single-shot**: after `disconnect()`, the client is closed for
+good and further `enqueue`/`connect` calls reject with a `ClientClosedError`.
+Construct a fresh `QueueClient` to enqueue again.
+
+## Connection behavior and errors
+
+Panqueue owns the Redis client and configures it with producer-appropriate
+defaults — there is nothing to tune:
+
+- **Commands never hang.** The offline queue is disabled, so an `enqueue`
+  issued while the socket is down rejects with `ClientConnectionError`
+  immediately instead of buffering until Redis returns. In an HTTP handler
+  that means a fast 503 path, not a stuck request.
+- **The initial connect fails fast.** A few bounded attempts, then
+  `ClientConnectionError`. A later call retries from scratch.
+- **Established connections self-heal.** After a successful connect, the
+  client reconnects indefinitely in the background; enqueues fail fast during
+  the outage and succeed again as soon as Redis is back.
+
+Every error a client throws is a `PanqueueError` subclass, so callers can
+branch on what actually went wrong:
+
+```ts
+import { ClientConnectionError, SerializationError } from "@panqueue/client";
+
+try {
+  await client.enqueue("email", payload);
+} catch (err) {
+  if (err instanceof ClientConnectionError) return res.status(503).end(); // Redis down — retryable
+  if (err instanceof SerializationError) throw err; // programmer error — let it crash
+  throw err;
+}
+```
+
+| Error                   | Thrown when                                             | Retryable |
+| ----------------------- | ------------------------------------------------------- | --------- |
+| `SerializationError`    | The payload is not strictly JSON-serializable.          | No        |
+| `ClientConnectionError` | Redis is unreachable (connect failed or socket down).   | Yes       |
+| `ClientClosedError`     | The client was used after `disconnect()`.               | No        |
+| `EnqueueError`          | Redis rejected the enqueue command (carries `queueId`). | No        |
+
+For connection observability — logging socket errors and reconnects — pass
+`events` as the second constructor argument:
+
+```ts
+const client = new QueueClient(pq, {
+  events: {
+    onConnectionError: ({ error }) => log.warn({ err: error }, "redis error"),
+    onConnectionReconnecting: () => log.warn("redis reconnecting"),
+    onConnectionReady: () => log.info("redis ready"),
+  },
+});
+```
+
+Handlers are fire-and-forget: a throwing handler is swallowed and never
+affects enqueueing.
+
 ## API surface
 
 ```ts
 class QueueClient<TQueues extends QueueMap = QueueMap> {
-  constructor(config: PanqueueConfig<TQueues> | QueueClientConfig);
+  constructor(config: PanqueueConfig<TQueues> | QueueClientConfig, options?: QueueClientOptions);
   async connect(): Promise<void>;
   async disconnect(): Promise<void>;
   async enqueue<K extends keyof TQueues & string>(
@@ -102,12 +161,18 @@ class QueueClient<TQueues extends QueueMap = QueueMap> {
 }
 ```
 
-| Export              | Kind  | Description                                                          |
-| ------------------- | ----- | -------------------------------------------------------------------- |
-| `QueueClient`       | Class | Type-safe producer client with lazy Redis connection.                |
-| `RedisConnection`   | Class | Thin wrapper around the `redis` npm client for connection lifecycle. |
-| `EnqueueOptions`    | Type  | Per-job options: `retries` and `maxStalls`.                          |
-| `QueueClientConfig` | Type  | Standalone client config shaped `{ redis: ConnectionOptions }`.      |
+| Export                  | Kind  | Description                                                          |
+| ----------------------- | ----- | -------------------------------------------------------------------- |
+| `QueueClient`           | Class | Type-safe producer client with lazy Redis connection.                |
+| `RedisConnection`       | Class | Thin wrapper around the `redis` npm client for connection lifecycle. |
+| `EnqueueOptions`        | Type  | Per-job options: `retries` and `maxStalls`.                          |
+| `QueueClientConfig`     | Type  | Standalone client config shaped `{ redis: ConnectionOptions }`.      |
+| `QueueClientOptions`    | Type  | Constructor options: connection `events` handlers.                   |
+| `ClientConnectionError` | Class | Redis unreachable; retryable.                                        |
+| `ClientClosedError`     | Class | Client used after `disconnect()`.                                    |
+| `EnqueueError`          | Class | Redis rejected the enqueue command.                                  |
+| `PanqueueError`         | Class | Base class for every error Panqueue throws (re-exported from core).  |
+| `SerializationError`    | Class | Payload not JSON-serializable (re-exported from core).               |
 
 <Callout type="info" title="One client per queue set">
   A single `QueueClient` can enqueue to any queue in the `QueueMap` generic. You do not need a

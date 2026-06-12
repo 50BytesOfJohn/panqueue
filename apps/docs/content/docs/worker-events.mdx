@@ -146,8 +146,8 @@ duplicating reporting across the retry and failed handlers:
         onJobFailed({ job, error, cause }) {
           log.error({ jobId: job.id, runs: job.runs, cause, err: error }, "job failed permanently");
         },
-        onWorkerError({ scope, error }) {
-          log.error({ scope, err: error }, "worker error");
+        onWorkerError({ kind, jobId, error }) {
+          log.error({ kind, jobId, err: error }, "worker error");
         },
       },
     });
@@ -185,7 +185,7 @@ handler and cannot know how long it took.
   Each event has one job; you rarely need the same side effect in two of them.
 - **Handler failures can never break jobs.** If an event handler throws or
   rejects, Panqueue catches it and never changes job state. The failure is
-  reported to `onWorkerError` with scope `events:<handlerName>`, so register
+  reported to `onWorkerError` with kind `"event-handler"`, so register
   `onWorkerError` for full visibility into hook failures. Do not put logic in
   event handlers that must succeed.
 - **Keep handlers fast.** They run synchronously on the job-processing path.
@@ -330,14 +330,32 @@ worker; stalled-job recovery will eventually reconcile it.
 ### onWorkerError
 
 ```ts
-onWorkerError?(event: { scope: string; error: unknown }): void;
+onWorkerError?(event: {
+  kind:
+    | "claim"
+    | "lease-renew"
+    | "lease-lost"
+    | "recovery-sweep"
+    | "ack"
+    | "requeue"
+    | "event-handler";
+  jobId?: string;
+  handlerName?: string;
+  error: unknown;
+}): void;
 ```
 
 Fires on internal worker errors that are not tied to a single job outcome:
 claim failures, lease-renewal failures, recovery-sweep failures, and failures
-thrown by other event handlers. `scope` names the operation, e.g. `"claim"`,
-`"extend:<jobId>"`, or `"events:onJobCompleted"`. Failures thrown by
-`onWorkerError` itself are dropped.
+thrown by other event handlers. `kind` names the operation that failed;
+`jobId` is set when the failure is job-scoped (lease renewals,
+acknowledgements, shutdown requeues), and `handlerName` names the throwing
+handler for kind `"event-handler"`. Failures thrown by `onWorkerError` itself
+are dropped.
+
+Connection-level problems (the socket dropping, reconnect attempts) surface
+on the pool's `events` instead — see
+[Pool connection events](#pool-connection-events).
 
 ### onStateChange
 
@@ -347,3 +365,44 @@ onStateChange?(event: { from: WorkerState; to: WorkerState }): void;
 
 Fires on every worker lifecycle transition:
 `"idle" → "running" → "stopping" → "stopped"`.
+
+## Pool connection events
+
+The pool owns the two Redis sockets every worker shares — one command
+connection and one pub/sub subscriber — so connection observability lives on
+`WorkerPool`, not on individual workers. Register handlers through the pool's
+`events` option:
+
+```ts title="worker.ts"
+const pool = new WorkerPool(pq, {
+  workers: [emailWorker, imageWorker],
+  events: {
+    onConnectionError({ connection, error }) {
+      log.warn({ connection, err: error }, "redis socket error");
+    },
+    onNotificationsDegraded() {
+      log.warn("pub/sub down: workers are polling until the subscriber reconnects");
+    },
+    onNotificationsRestored() {
+      log.info("pub/sub restored");
+    },
+  },
+});
+```
+
+| Event                      | Fires when                                                 |
+| -------------------------- | ---------------------------------------------------------- |
+| `onConnectionError`        | A socket-level error occurs on either connection.          |
+| `onConnectionReconnecting` | A connection is lost and a reconnect attempt is scheduled. |
+| `onConnectionReady`        | A connection is established or re-established.             |
+| `onNotificationsDegraded`  | The subscriber socket drops — fires once per outage.       |
+| `onNotificationsRestored`  | The subscriber recovers after degrading.                   |
+
+Established connections reconnect indefinitely, so an outage is not fatal:
+workers wait it out and resume when Redis returns. While the **subscriber** is
+down, workers miss pub/sub wakeups and fall back to `pollInterval` polling —
+jobs still process, with up to `pollInterval` extra latency. That silent
+degradation is exactly what `onNotificationsDegraded` exists to surface.
+
+Like worker event handlers, pool handlers are fire-and-forget: a throwing
+handler is swallowed and never affects the pool.

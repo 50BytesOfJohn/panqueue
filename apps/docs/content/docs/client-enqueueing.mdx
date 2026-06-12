@@ -89,7 +89,7 @@ When you call `enqueue`, the client performs these steps in order:
   <Step>
     **Validate the payload** — `assertJsonSerializable` rejects `Date`, `Map`, `Set`,
     functions, `undefined`, class instances, and values nested deeper than 64 levels.
-    If validation fails, the client throws a `TypeError` and never touches Redis.
+    If validation fails, the client throws a `SerializationError` and never touches Redis.
   </Step>
 
 <Step>**Generate a job ID** — a unique identifier is created locally.</Step>
@@ -174,6 +174,33 @@ await client.enqueue("email", payload);
 await client.disconnect();
 ```
 
+Disconnecting is final: clients are single-shot, and `enqueue` after
+`disconnect()` rejects with a `ClientClosedError`. Construct a new
+`QueueClient` if you need to enqueue again.
+
+### Handling a Redis outage
+
+`enqueue` never hangs waiting for Redis. While the connection is down, calls
+reject with a `ClientConnectionError`; the client keeps reconnecting in the
+background and enqueues succeed again once Redis is back. The caller owns the
+retry decision:
+
+```ts
+import { ClientConnectionError } from "@panqueue/client";
+
+export async function handler(req: Request) {
+  try {
+    await client.enqueue("email", payload);
+  } catch (err) {
+    if (err instanceof ClientConnectionError) {
+      return new Response("queue unavailable, retry later", { status: 503 });
+    }
+    throw err;
+  }
+  return new Response("ok");
+}
+```
+
 ## Enqueueing from multiple runtimes
 
 Panqueue clients run on Node, Bun, and Deno with the same API:
@@ -229,12 +256,12 @@ Panqueue clients run on Node, Bun, and Deno with the same API:
 
 ```ts
 class QueueClient<TQueues extends QueueMap = QueueMap> {
-  constructor(config: PanqueueConfig<TQueues> | QueueClientConfig);
+  constructor(config: PanqueueConfig<TQueues> | QueueClientConfig, options?: QueueClientOptions);
 
   /** Explicitly connect to Redis. */
   async connect(): Promise<void>;
 
-  /** Gracefully disconnect from Redis. */
+  /** Gracefully disconnect from Redis and close this client permanently. */
   async disconnect(): Promise<void>;
 
   /**
@@ -261,11 +288,32 @@ interface QueueClientConfig {
   redis: ConnectionOptions;
 }
 
+interface QueueClientOptions {
+  events?: ClientEventHandlers;
+}
+
+interface ClientEventHandlers {
+  onConnectionError?(event: { error: unknown }): void;
+  onConnectionReconnecting?(): void;
+  onConnectionReady?(): void;
+}
+
 interface EnqueueOptions {
   retries?: number;
   maxStalls?: number;
 }
 ```
+
+### Errors
+
+Every error thrown by the client extends `PanqueueError`:
+
+| Error                   | Thrown when                                             |
+| ----------------------- | ------------------------------------------------------- |
+| `SerializationError`    | The payload is not strictly JSON-serializable.          |
+| `ClientConnectionError` | Redis is unreachable. Retryable.                        |
+| `ClientClosedError`     | The client was used after `disconnect()`.               |
+| `EnqueueError`          | Redis rejected the enqueue command (carries `queueId`). |
 
 | Type                | Description                                                                                         |
 | ------------------- | --------------------------------------------------------------------------------------------------- |
