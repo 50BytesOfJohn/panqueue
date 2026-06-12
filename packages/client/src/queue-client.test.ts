@@ -1,7 +1,8 @@
+import type { PanqueueConfig } from "@panqueue/config";
 import { queueKeys } from "@panqueue/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createQueueClient, QueueClient } from "./queue-client.js";
+import { QueueClient } from "./queue-client.js";
 import { RedisConnection } from "./redis-connection.js";
 
 const { connectMock, disconnectMock, enqueueMock } = vi.hoisted(() => ({
@@ -24,7 +25,7 @@ type TestQueues = {
   emails: { to: string; subject: string };
 };
 
-const makeClient = () => new QueueClient<TestQueues>({ connection: "redis://localhost:6379" });
+const makeClient = () => new QueueClient<TestQueues>({ redis: "redis://localhost:6379" });
 
 /** The non-key enqueue args sent to Redis by the most recent enqueue call. */
 const lastSentArgs = () => enqueueMock.mock.calls[0][1];
@@ -163,18 +164,35 @@ describe("QueueClient.disconnect", () => {
   });
 });
 
-describe("createQueueClient", () => {
+describe("QueueClient constructor", () => {
   it("builds the connection from the config's redis option", () => {
     // Arrange
     const config = {
+      redis: "redis://example:6379",
+    };
+
+    // Act
+    const client = new QueueClient<TestQueues>(config);
+
+    // Assert
+    expect(client).toBeInstanceOf(QueueClient);
+    expect(RedisConnection).toHaveBeenCalledWith("redis://example:6379");
+  });
+
+  it("infers queue types from a shared PanqueueConfig", async () => {
+    // Arrange
+    const config: PanqueueConfig<TestQueues> = {
       redis: "redis://example:6379",
       queues: { emails: {} },
     };
 
     // Act
-    createQueueClient<TestQueues>(config);
+    const client = new QueueClient(config);
+    await client.enqueue("emails", { to: "a@b.com", subject: "Hi" });
 
-    // Assert
-    expect(RedisConnection).toHaveBeenCalledWith("redis://example:6379");
+    // Assert — "emails" type-checks without an explicit generic; unknown queues don't.
+    // @ts-expect-error - queue id not present in the config's queue map
+    await client.enqueue("unknown", {}).catch(() => {});
+    expect(lastSentArgs().queueId).toBe("emails");
   });
 });

@@ -9,7 +9,7 @@ type DemoQueues = {
 
 const CONNECTION = { host: "localhost", port: 6399 };
 
-const client = new QueueClient<DemoQueues>({ connection: CONNECTION });
+const client = new QueueClient<DemoQueues>({ redis: CONNECTION });
 
 const job1 = await client.enqueue("emails", {
   to: "alice@example.com",

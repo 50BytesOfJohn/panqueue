@@ -14,53 +14,47 @@ import { RedisConnection } from "./redis-connection.js";
 /** Options for enqueuing a job. */
 export type EnqueueOptions = JobOptions;
 
-/** Per-queue configuration for the client-only config. */
-export interface ClientQueueConfig {
-  /** Concurrency settings for this queue. Defaults to automatic scope detection. */
-  concurrency?: {
-    /** Queue concurrency scope. */
-    scope?: "global" | "auto";
-  };
-}
-
 /** Client-specific configuration (for codebases that don't share a PanqueueConfig). */
-export interface QueueClientConfig<TQueues extends QueueMap> {
+export interface QueueClientConfig {
   /** Redis connection configuration. */
   redis: ConnectionOptions;
-
-  /** Per-queue settings. Keys must match `keyof TQueues`. */
-  queues: { [K in keyof TQueues]: ClientQueueConfig };
-}
-
-/** Options for constructing a QueueClient directly. */
-export interface QueueClientOptions {
-  /** Redis connection configuration. */
-  connection: ConnectionOptions;
 }
 
 /**
  * Type-safe client for enqueuing jobs into Panqueue.
  *
- * @example
+ * Pass a shared `PanqueueConfig` to infer queue names and payload types
+ * automatically, or a client-specific config with the queue map as the type
+ * argument.
+ *
+ * @example Shared config
+ * ```ts
+ * import { pq } from "./panqueue.config.js";
+ *
+ * const client = new QueueClient(pq);
+ * await client.enqueue("emails", { to: "a@b.com", subject: "Hello" });
+ * ```
+ *
+ * @example Client-specific config
  * ```ts
  * type MyQueues = {
  *   emails: { to: string; subject: string };
  *   thumbnails: { url: string; width: number };
  * };
  *
- * const mq = new QueueClient<MyQueues>({
- *   connection: "redis://localhost:6379",
+ * const client = new QueueClient<MyQueues>({
+ *   redis: "redis://localhost:6379",
  * });
  *
- * await mq.enqueue("emails", { to: "a@b.com", subject: "Hello" });
- * await mq.disconnect();
+ * await client.enqueue("emails", { to: "a@b.com", subject: "Hello" });
+ * await client.disconnect();
  * ```
  */
 export class QueueClient<TQueues extends QueueMap = QueueMap> {
   #redis: RedisConnection;
 
-  constructor(options: QueueClientOptions) {
-    this.#redis = new RedisConnection(options.connection);
+  constructor(config: PanqueueConfig<TQueues> | QueueClientConfig) {
+    this.#redis = new RedisConnection(config.redis);
   }
 
   /**
@@ -117,45 +111,4 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
   get redis(): RedisConnection {
     return this.#redis;
   }
-}
-
-/**
- * Create a type-safe QueueClient from a shared PanqueueConfig.
- *
- * The `TQueues` generic is inferred from the config, so queue names and
- * payload types are automatically available on the returned client.
- *
- * @example
- * ```ts
- * import { pq } from "./panqueue.config.js";
- * const client = createQueueClient(pq);
- * await client.enqueue("emails", { to: "a@b.com", subject: "Hi" });
- * ```
- */
-export function createQueueClient<TQueues extends QueueMap>(
-  config: PanqueueConfig<TQueues>,
-): QueueClient<TQueues>;
-
-/**
- * Create a type-safe QueueClient from a client-specific config.
- *
- * Use this overload in distributed systems where the client has its own
- * configuration separate from the worker. Scope defaults to `"auto"` per queue.
- *
- * @example
- * ```ts
- * const client = createQueueClient<MyQueues>({
- *   redis: "redis://localhost:6379",
- *   queues: { emails: {}, thumbnails: { concurrency: { scope: "global" } } },
- * });
- * ```
- */
-export function createQueueClient<TQueues extends QueueMap>(
-  config: QueueClientConfig<TQueues>,
-): QueueClient<TQueues>;
-
-export function createQueueClient<TQueues extends QueueMap>(
-  config: PanqueueConfig<TQueues> | QueueClientConfig<TQueues>,
-): QueueClient<TQueues> {
-  return new QueueClient<TQueues>({ connection: config.redis });
 }

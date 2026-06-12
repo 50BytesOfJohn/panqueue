@@ -1,11 +1,4 @@
-export {
-  type ClientQueueConfig,
-  createQueueClient,
-  type EnqueueOptions,
-  QueueClient,
-  type QueueClientConfig,
-  type QueueClientOptions,
-} from "./src/queue-client.js";
+export { type EnqueueOptions, QueueClient, type QueueClientConfig } from "./src/queue-client.js";
 export { type PanqueueProducerClient, RedisConnection } from "./src/redis-connection.js";
 
 export type { PanqueueConfig, QueueConfig } from "@panqueue/config";
