@@ -1,6 +1,6 @@
 {
   "name": "@panqueue/config",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Type-safe shared configuration for panqueue clients and workers.",
   "keywords": [
     "background-jobs",
