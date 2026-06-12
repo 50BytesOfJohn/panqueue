@@ -30,6 +30,8 @@ export {
   resolveRetention,
 } from "./src/retention.js";
 
+export { PanqueueError, SerializationError } from "./src/errors.js";
+
 export { deserializeJobHash } from "./src/job-hash.js";
 export { generateJobId } from "./src/job-id.js";
 export { assertJsonSerializable } from "./src/serialization.js";

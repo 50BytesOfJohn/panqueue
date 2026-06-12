@@ -1,3 +1,5 @@
+import { SerializationError } from "./errors.js";
+
 /** Max nesting depth before we throw our own error instead of stack-overflowing. */
 const MAX_DEPTH = 64;
 
@@ -9,7 +11,7 @@ const MAX_DEPTH = 64;
  * `BigInt`, `NaN`/`Infinity`, and structures nested deeper than
  * {@link MAX_DEPTH} levels.
  *
- * @throws {TypeError} if the value is not JSON-serializable.
+ * @throws {SerializationError} if the value is not JSON-serializable.
  */
 export function assertJsonSerializable(value: unknown): void {
   _assertImpl(value, "payload", 0);
@@ -17,7 +19,7 @@ export function assertJsonSerializable(value: unknown): void {
 
 function _assertImpl(value: unknown, path: string, depth: number): void {
   if (depth > MAX_DEPTH) {
-    throw new TypeError(`${path} exceeds maximum nesting depth of ${MAX_DEPTH}`);
+    throw new SerializationError(`${path} exceeds maximum nesting depth of ${MAX_DEPTH}`);
   }
   if (value === null) return;
 
@@ -27,35 +29,37 @@ function _assertImpl(value: unknown, path: string, depth: number): void {
       return;
     case "number":
       if (!Number.isFinite(value)) {
-        throw new TypeError(`${path} contains a non-finite number (NaN or Infinity)`);
+        throw new SerializationError(`${path} contains a non-finite number (NaN or Infinity)`);
       }
       return;
     case "undefined":
-      throw new TypeError(`${path} contains undefined`);
+      throw new SerializationError(`${path} contains undefined`);
     case "function":
-      throw new TypeError(`${path} contains a function`);
+      throw new SerializationError(`${path} contains a function`);
     case "symbol":
-      throw new TypeError(`${path} contains a symbol`);
+      throw new SerializationError(`${path} contains a symbol`);
     case "bigint":
-      throw new TypeError(`${path} contains a BigInt`);
+      throw new SerializationError(`${path} contains a BigInt`);
     default:
       break;
   }
 
   if (value instanceof Date) {
-    throw new TypeError(`${path} contains a Date instance`);
+    throw new SerializationError(`${path} contains a Date instance`);
   }
 
   if (value instanceof RegExp) {
-    throw new TypeError(`${path} contains a RegExp instance`);
+    throw new SerializationError(`${path} contains a RegExp instance`);
   }
 
   if (value instanceof Map || value instanceof Set) {
-    throw new TypeError(`${path} contains a ${value instanceof Map ? "Map" : "Set"} instance`);
+    throw new SerializationError(
+      `${path} contains a ${value instanceof Map ? "Map" : "Set"} instance`,
+    );
   }
 
   if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
-    throw new TypeError(`${path} contains a binary data view or ArrayBuffer`);
+    throw new SerializationError(`${path} contains a binary data view or ArrayBuffer`);
   }
 
   if (Array.isArray(value)) {
@@ -67,7 +71,7 @@ function _assertImpl(value: unknown, path: string, depth: number): void {
 
   const proto = Object.getPrototypeOf(value);
   if (proto !== Object.prototype && proto !== null) {
-    throw new TypeError(`${path} contains a class instance`);
+    throw new SerializationError(`${path} contains a class instance`);
   }
 
   for (const [key, child] of Object.entries(value)) {
