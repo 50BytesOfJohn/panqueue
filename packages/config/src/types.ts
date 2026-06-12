@@ -4,12 +4,6 @@ export type { RetentionRule } from "@panqueue/core";
 
 /** Per-queue configuration within the shared config. */
 export interface QueueConfig {
-  /** Concurrency settings for this queue. Defaults to global scope. */
-  concurrency?: {
-    /** Queue-wide concurrency scope. */
-    scope: "global";
-  };
-
   /**
    * How long Panqueue keeps finished jobs, per terminal state. `ttl` is the
    * retention window in milliseconds.

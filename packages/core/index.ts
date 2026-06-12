@@ -15,7 +15,6 @@ export {
   delayedKey,
   failedKey,
   jobKey,
-  metaKey,
   notifyKey,
   queueHashTag,
   queueKey,

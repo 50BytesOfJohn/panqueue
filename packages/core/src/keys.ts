@@ -59,11 +59,6 @@ export function jobKey(queueId: string, jobId: string): QueueKey<"job"> {
   return queueKey(queueId, `job:${jobId}`) as QueueKey<"job">;
 }
 
-/** Queue metadata hash (scope, concurrency settings, etc.). */
-export function metaKey(queueId: string): QueueKey<"meta"> {
-  return queueKey(queueId, "meta") as QueueKey<"meta">;
-}
-
 /** Pub/sub notification channel for new job availability. */
 export function notifyKey(queueId: string): QueueKey<"notify"> {
   return queueKey(queueId, "notify") as QueueKey<"notify">;
@@ -82,7 +77,6 @@ export interface QueueKeys {
   readonly completed: QueueKey<"completed">;
   readonly failed: QueueKey<"failed">;
   readonly delayed: QueueKey<"delayed">;
-  readonly meta: QueueKey<"meta">;
   readonly notify: QueueKey<"notify">;
 }
 
@@ -94,7 +88,6 @@ export function queueKeys(queueId: string): QueueKeys {
     completed: completedKey(queueId),
     failed: failedKey(queueId),
     delayed: delayedKey(queueId),
-    meta: metaKey(queueId),
     notify: notifyKey(queueId),
   };
 }

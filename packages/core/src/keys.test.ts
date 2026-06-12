@@ -41,7 +41,6 @@ describe("queueKeys", () => {
       completed: "{q:emails}:completed",
       failed: "{q:emails}:failed",
       delayed: "{q:emails}:delayed",
-      meta: "{q:emails}:meta",
       notify: "{q:emails}:notify",
     });
   });
