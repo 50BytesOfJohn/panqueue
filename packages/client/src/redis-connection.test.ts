@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ClientClosedError, ClientConnectionError } from "./errors.js";
 import { RedisConnection } from "./redis-connection.js";
 
 const { createClientMock, connectMock, disconnectMock } = vi.hoisted(() => ({
@@ -59,7 +60,7 @@ describe("RedisConnection connection options", () => {
     await connection.connect();
 
     // Assert
-    expect(passedOptions().socket).toEqual({ host: "example", port: 1234 });
+    expect(passedOptions().socket).toMatchObject({ host: "example", port: 1234 });
   });
 
   it("defaults host to localhost and port to 6379 when omitted", async () => {
@@ -70,7 +71,7 @@ describe("RedisConnection connection options", () => {
     await connection.connect();
 
     // Assert
-    expect(passedOptions().socket).toEqual({ host: "localhost", port: 6379 });
+    expect(passedOptions().socket).toMatchObject({ host: "localhost", port: 6379 });
   });
 
   it("enables tls in the socket when tls is set", async () => {
@@ -81,7 +82,7 @@ describe("RedisConnection connection options", () => {
     await connection.connect();
 
     // Assert
-    expect(passedOptions().socket).toEqual({ host: "example", port: 6379, tls: true });
+    expect(passedOptions().socket).toMatchObject({ host: "example", port: 6379, tls: true });
   });
 
   it("maps password from parameter options", async () => {
@@ -189,17 +190,132 @@ describe("RedisConnection.disconnect", () => {
     expect(disconnectMock).not.toHaveBeenCalled();
   });
 
-  it("allows reconnecting after disconnect", async () => {
+  it("is single-shot: connect after disconnect rejects with ClientClosedError", async () => {
     // Arrange
     const connection = new RedisConnection("redis://host:6379");
     await connection.connect();
     await connection.disconnect();
+
+    // Act & Assert
+    await expect(connection.connect()).rejects.toBeInstanceOf(ClientClosedError);
+    expect(createClientMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects client access after disconnect with ClientClosedError", async () => {
+    // Arrange
+    const connection = new RedisConnection("redis://host:6379");
+    await connection.connect();
+    await connection.disconnect();
+
+    // Act & Assert
+    expect(() => connection.client).toThrow(ClientClosedError);
+  });
+});
+
+describe("RedisConnection producer defaults", () => {
+  it("disables the offline queue so commands fail fast while disconnected", async () => {
+    // Arrange
+    const connection = new RedisConnection("redis://host:6379");
+
+    // Act
+    await connection.connect();
+
+    // Assert
+    expect(passedOptions().disableOfflineQueue).toBe(true);
+  });
+
+  it("configures a reconnect strategy on the socket", async () => {
+    // Arrange
+    const connection = new RedisConnection("redis://host:6379");
+
+    // Act
+    await connection.connect();
+
+    // Assert
+    expect(typeof passedOptions().socket.reconnectStrategy).toBe("function");
+  });
+
+  it("gives up the initial connect after a few attempts", async () => {
+    // Arrange
+    const connection = new RedisConnection("redis://host:6379");
+    await connection.connect();
+    const strategy = passedOptions().socket.reconnectStrategy;
+    const cause = new Error("ECONNREFUSED");
+
+    // Act & Assert — never connected: bounded retries, then surface the cause.
+    expect(typeof strategy(0, cause)).toBe("number");
+    expect(strategy(3, cause)).toBe(cause);
+  });
+
+  it("reconnects indefinitely once a connection was established", async () => {
+    // Arrange
+    const connection = new RedisConnection("redis://host:6379");
+    await connection.connect();
+    const readyListener = fakeClient.on.mock.calls.find(([event]) => event === "ready")?.[1];
+    readyListener();
+
+    // Act
+    const delay = passedOptions().socket.reconnectStrategy(100, new Error("socket closed"));
+
+    // Assert
+    expect(typeof delay).toBe("number");
+  });
+
+  it("wraps connect failures in ClientConnectionError", async () => {
+    // Arrange
+    connectMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const connection = new RedisConnection("redis://host:6379");
+
+    // Act & Assert
+    await expect(connection.connect()).rejects.toBeInstanceOf(ClientConnectionError);
+  });
+
+  it("retries the connection on a later connect after a failed one", async () => {
+    // Arrange
+    connectMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const connection = new RedisConnection("redis://host:6379");
+    await connection.connect().catch(() => {});
 
     // Act
     await connection.connect();
 
     // Assert
     expect(createClientMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("RedisConnection lifecycle hooks", () => {
+  it("forwards socket error events to the onError hook", async () => {
+    // Arrange
+    const onError = vi.fn();
+    const connection = new RedisConnection("redis://host:6379", { onError });
+    await connection.connect();
+    const errorListener = fakeClient.on.mock.calls.find(([event]) => event === "error")?.[1];
+    const socketError = new Error("socket boom");
+
+    // Act
+    errorListener(socketError);
+
+    // Assert
+    expect(onError).toHaveBeenCalledWith(socketError);
+  });
+
+  it("forwards reconnecting and ready events to their hooks", async () => {
+    // Arrange
+    const onReconnecting = vi.fn();
+    const onReady = vi.fn();
+    const connection = new RedisConnection("redis://host:6379", { onReconnecting, onReady });
+    await connection.connect();
+    const listener = (name: string) =>
+      fakeClient.on.mock.calls.find(([event]) => event === name)?.[1];
+
+    // Act
+    listener("reconnecting")();
+    listener("ready")();
+
+    // Assert
+    expect(onReconnecting).toHaveBeenCalledOnce();
+    expect(onReady).toHaveBeenCalledOnce();
   });
 });
 
