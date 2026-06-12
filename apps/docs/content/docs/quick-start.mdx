@@ -30,7 +30,7 @@ type Queues = {
 export const pq = definePanqueueConfig<Queues>({
   redis: { url: "redis://localhost:6379" },
   queues: {
-    email: { concurrency: { scope: "global" } },
+    email: {},
   },
 });
 ```
@@ -38,10 +38,10 @@ export const pq = definePanqueueConfig<Queues>({
 ## Enqueue work
 
 ```ts title="enqueue.ts"
-import { createQueueClient } from "@panqueue/client";
+import { QueueClient } from "@panqueue/client";
 import { pq } from "./panqueue.config.ts";
 
-await using client = createQueueClient(pq);
+await using client = new QueueClient(pq);
 
 await client.enqueue(
   "email",

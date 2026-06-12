@@ -1,0 +1,115 @@
+---
+title: Overview
+description: Type-safe producer client for enqueuing jobs into Panqueue from any Node, Bun, or Deno process.
+icon: Send
+---
+
+`@panqueue/client` is the producer-side package. It opens a Redis connection,
+validates payloads, and enqueues jobs into the waiting list of any queue defined
+in your shared config.
+
+The package is small and focused: its only job is to get work into Redis so a
+worker can claim it later. Everything else — retries, leases, stalled-job recovery,
+and shutdown — is handled by `@panqueue/worker`.
+
+<Cards>
+  <Card
+    title="Enqueueing jobs"
+    description="Create a client, call enqueue, and control retries and stall budgets."
+    href="/docs/client-enqueueing"
+  />
+</Cards>
+
+## What you get
+
+- **Full type safety** for queue names and payloads, derived from a shared `PanqueueConfig`
+- **Lazy Redis connection** that opens on the first `enqueue` call
+- **Runtime payload validation** that rejects non-JSON-serializable values before they hit Redis
+- **Lightweight footprint** — one Redis connection per `QueueClient` instance
+
+## When to use it
+
+| Scenario                         | Recommendation                                          |
+| -------------------------------- | ------------------------------------------------------- |
+| Web API enqueues background jobs | Import `@panqueue/client` in your route handlers        |
+| Script or CLI batches work       | Create a client, loop, and call `enqueue` for each item |
+| Distributed producer             | Use `QueueClient` with a standalone `QueueClientConfig` |
+
+## Two ways to create a client
+
+The constructor accepts a shared `PanqueueConfig` and infers the queue map
+automatically. This is the recommended pattern for monorepos where producers
+and workers share the same config file:
+
+```ts
+import { QueueClient } from "@panqueue/client";
+import { pq } from "./panqueue.config.ts";
+
+await using client = new QueueClient(pq);
+
+await client.enqueue("email", { to: "user@example.com", subject: "Hi" });
+```
+
+When the producer lives in a different codebase from the worker and you do not
+share a `PanqueueConfig`, pass the queue map as the type argument and provide
+the Redis connection directly:
+
+```ts
+import { QueueClient } from "@panqueue/client";
+
+type MyQueues = {
+  email: { to: string; subject: string };
+};
+
+const client = new QueueClient<MyQueues>({
+  redis: "redis://localhost:6379",
+});
+```
+
+## Connection lifecycle
+
+`QueueClient` connects lazily. The first `enqueue` call opens the Redis socket;
+until then, no network resources are held. You can optionally call `connect()`
+at startup to verify connectivity before the first request:
+
+```ts
+await client.connect();
+```
+
+Always close the connection when you are done. `QueueClient` implements
+`Symbol.asyncDispose`, so `await using` handles it automatically:
+
+```ts
+await using client = new QueueClient(pq);
+// ... enqueue jobs
+// client.disconnect() is called automatically on scope exit
+```
+
+## API surface
+
+```ts
+class QueueClient<TQueues extends QueueMap = QueueMap> {
+  constructor(config: PanqueueConfig<TQueues> | QueueClientConfig);
+  async connect(): Promise<void>;
+  async disconnect(): Promise<void>;
+  async enqueue<K extends keyof TQueues & string>(
+    queueId: K,
+    data: TQueues[K],
+    options?: EnqueueOptions,
+  ): Promise<string>;
+  get redis(): RedisConnection;
+  async [Symbol.asyncDispose](): Promise<void>;
+}
+```
+
+| Export              | Kind  | Description                                                          |
+| ------------------- | ----- | -------------------------------------------------------------------- |
+| `QueueClient`       | Class | Type-safe producer client with lazy Redis connection.                |
+| `RedisConnection`   | Class | Thin wrapper around the `redis` npm client for connection lifecycle. |
+| `EnqueueOptions`    | Type  | Per-job options: `retries` and `maxStalls`.                          |
+| `QueueClientConfig` | Type  | Standalone client config shaped `{ redis: ConnectionOptions }`.      |
+
+<Callout type="info" title="One client per queue set">
+  A single `QueueClient` can enqueue to any queue in the `QueueMap` generic. You do not need a
+  separate client per queue.
+</Callout>

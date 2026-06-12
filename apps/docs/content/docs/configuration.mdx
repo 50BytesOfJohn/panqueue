@@ -47,7 +47,7 @@ file, then import that file from producers and workers.
     export const pq = definePanqueueConfig<Queues>({
       redis: { url: "redis://localhost:6379" },
       queues: {
-        email: { concurrency: { scope: "global" } },
+        email: {},
         thumbnail: {},
       },
     });
@@ -59,10 +59,10 @@ file, then import that file from producers and workers.
     Import the config anywhere that needs queue types.
 
     ```ts title="enqueue.ts"
-    import { createQueueClient } from "@panqueue/client";
+    import { QueueClient } from "@panqueue/client";
     import { pq } from "./panqueue.config.ts";
 
-    await using client = createQueueClient(pq);
+    await using client = new QueueClient(pq);
 
     await client.enqueue("email", {
       to: "user@example.com",
@@ -85,7 +85,7 @@ file, then import that file from producers and workers.
 
 `definePanqueueConfig` is an identity function. It returns the object unchanged,
 opens no Redis connections, and exists so TypeScript can infer queue IDs and
-payload types from the same value you pass to `createQueueClient`,
+payload types from the same value you pass to `QueueClient`,
 `defineWorker`, and `WorkerPool`.
 
 ## Queue payloads
@@ -225,16 +225,19 @@ type Queues = {
 export const pq = definePanqueueConfig<Queues>({
   redis: "redis://localhost:6379",
   queues: {
-    email: { concurrency: { scope: "global" } },
+    email: {
+      retention: {
+        failed: { ttl: 86_400_000 },
+      },
+    },
     image: {},
   },
 });
 ```
 
-| Option              | Type       | Default      | Description                                      |
-| ------------------- | ---------- | ------------ | ------------------------------------------------ |
-| `concurrency.scope` | `"global"` | Global scope | Applies queue concurrency as a queue-wide limit. |
-| `retention`         | `object`   | See below    | Controls how long finished jobs stay in Redis.   |
+| Option      | Type     | Default   | Description                                    |
+| ----------- | -------- | --------- | ---------------------------------------------- |
+| `retention` | `object` | See below | Controls how long finished jobs stay in Redis. |
 
 ## Retention
 
@@ -358,9 +361,6 @@ interface PanqueueConfig<TQueues extends QueueMap> {
 }
 
 interface QueueConfig {
-  concurrency?: {
-    scope: "global";
-  };
   retention?: {
     completed?: RetentionRule;
     failed?: RetentionRule;

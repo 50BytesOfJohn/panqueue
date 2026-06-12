@@ -34,7 +34,7 @@ The same TypeScript source tree is published to npm and JSR.
 | --------------------------------------- | ------------------------------------------------------- |
 | [`@panqueue/core`](./packages/core)     | Shared types, key helpers, and serialization primitives |
 | [`@panqueue/config`](./packages/config) | Shared queue config (`definePanqueueConfig`)            |
-| [`@panqueue/client`](./packages/client) | Producer — `createQueueClient` / `QueueClient`          |
+| [`@panqueue/client`](./packages/client) | Producer — `QueueClient`                                |
 | [`@panqueue/worker`](./packages/worker) | Consumer — `defineWorker` / `WorkerPool`                |
 
 All packages are **ESM-only** and ship with first-class types.
@@ -82,9 +82,9 @@ const config = definePanqueueConfig<Queues>({
 ### 2. Enqueue jobs
 
 ```ts
-import { createQueueClient } from "@panqueue/client";
+import { QueueClient } from "@panqueue/client";
 
-const client = createQueueClient(config);
+const client = new QueueClient(config);
 await client.connect();
 
 await client.enqueue("email", { to: "user@example.com", subject: "Hello" });
@@ -136,7 +136,7 @@ await pool.shutdown({ drain: true, timeout: 30_000 });
 
 ```
 definePanqueueConfig  →  PanqueueConfig    (shared config, no connections)
-createQueueClient     →  QueueClient       (owns Redis producer connection)
+new QueueClient       →  QueueClient        (owns Redis producer connection)
 defineWorker          →  WorkerDefinition   (pure data, no connections, no lifecycle)
 new WorkerPool        →  WorkerPool         (owns Redis worker + subscriber connections)
 ```

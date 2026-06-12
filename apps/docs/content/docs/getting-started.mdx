@@ -26,7 +26,7 @@ type Queues = {
 export const pq = definePanqueueConfig<Queues>({
   redis: { url: "redis://localhost:6379" },
   queues: {
-    email: { concurrency: { scope: "global" } },
+    email: {},
   },
 });
 ```
@@ -40,10 +40,10 @@ Create a producer client from the shared config. Queue names and payloads are
 checked by TypeScript.
 
 ```ts title="enqueue.ts"
-import { createQueueClient } from "@panqueue/client";
+import { QueueClient } from "@panqueue/client";
 import { pq } from "./panqueue.config.ts";
 
-await using client = createQueueClient(pq);
+await using client = new QueueClient(pq);
 
 const jobId = await client.enqueue("email", {
   to: "user@example.com",

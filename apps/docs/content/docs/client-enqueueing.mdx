@@ -1,0 +1,274 @@
+---
+title: Enqueueing jobs
+description: Create a QueueClient, enqueue type-safe payloads, and configure per-job retry and stall budgets.
+icon: Send
+---
+
+This guide covers the full producer API: creating a client, enqueuing jobs with
+options, handling connection patterns, and what happens under the hood when a
+job is written to Redis.
+
+## Create a client
+
+### From a shared config
+
+In most apps, import the shared config and pass it to `new QueueClient`. The
+queue map is inferred automatically, so TypeScript checks every queue name and
+payload.
+
+```ts title="enqueue.ts"
+import { QueueClient } from "@panqueue/client";
+import { pq } from "./panqueue.config.ts";
+
+await using client = new QueueClient(pq);
+
+const jobId = await client.enqueue("email", {
+  to: "user@example.com",
+  subject: "Welcome",
+});
+
+console.log(`queued ${jobId}`);
+```
+
+### From a standalone connection
+
+When the producer runs in a separate service or language, you may not have access
+to the shared `PanqueueConfig`. Pass the `QueueMap` generic explicitly and give
+the client its own connection config:
+
+```ts title="enqueue.ts"
+import { QueueClient } from "@panqueue/client";
+
+type Queues = {
+  email: { to: string; subject: string };
+  thumbnail: { url: string; width: number };
+};
+
+await using client = new QueueClient<Queues>({
+  redis: { url: "redis://localhost:6379" },
+});
+
+await client.enqueue("thumbnail", { url: "https://example.com/img.jpg", width: 256 });
+```
+
+<Cards>
+  <Card
+    title="Connection options"
+    description="URL strings, URL objects, or host/port/password maps."
+    href="/docs/configuration#redis-connection"
+  />
+</Cards>
+
+## Enqueue options
+
+Every `enqueue` call accepts an optional third argument that controls how the
+job behaves when it fails:
+
+```ts
+await client.enqueue("email", payload, {
+  retries: 3,
+  maxStalls: 5,
+});
+```
+
+| Option      | Type     | Default | Description                                                                                  |
+| ----------- | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `retries`   | `number` | `0`     | How many times the handler may throw before the job is moved to failed.                      |
+| `maxStalls` | `number` | `5`     | How many times the job may be recovered after a crashed worker before it is moved to failed. |
+
+<Callout type="info" title="Retries are handler-level">
+  `retries` counts only failures thrown by your processor. It does not count stalls. The two budgets
+  are independent.
+</Callout>
+
+## What happens on enqueue
+
+When you call `enqueue`, the client performs these steps in order:
+
+<Steps>
+  <Step>
+    **Validate the payload** — `assertJsonSerializable` rejects `Date`, `Map`, `Set`,
+    functions, `undefined`, class instances, and values nested deeper than 64 levels.
+    If validation fails, the client throws a `TypeError` and never touches Redis.
+  </Step>
+
+<Step>**Generate a job ID** — a unique identifier is created locally.</Step>
+
+<Step>
+  **Connect lazily** — if this is the first call, the client opens the Redis socket and loads the
+  enqueue Lua script.
+</Step>
+
+<Step>
+  **Run the Lua script** — the script atomically: 1. Checks for an existing job ID (collision guard)
+  2. Stores the payload and lifecycle fields in a per-job hash 3. Pushes the job ID onto the waiting
+  list 4. Publishes a notification so workers can wake immediately
+</Step>
+
+  <Step>
+    **Return the job ID** — the string is returned to the caller so you can log
+    or trace the job.
+  </Step>
+</Steps>
+
+## Connection patterns
+
+### Lazy connection (default)
+
+The client does not open a Redis socket until the first `enqueue` call. This is
+ideal for short-lived scripts or CLI tools where you may not enqueue at all.
+
+```ts
+const client = new QueueClient(pq);
+// no connection yet
+
+await client.enqueue("email", payload); // connects now
+```
+
+### Eager connection
+
+Call `connect()` during startup if you want to fail fast when Redis is unreachable:
+
+```ts
+const client = new QueueClient(pq);
+await client.connect(); // throws immediately if Redis is down
+```
+
+### Reusing a client
+
+A single `QueueClient` instance can enqueue any number of jobs. It is safe to
+create one client at module level and reuse it across requests:
+
+```ts title="lib/queue.ts"
+import { QueueClient } from "@panqueue/client";
+import { pq } from "../panqueue.config.ts";
+
+export const client = new QueueClient(pq);
+```
+
+```ts title="api/route.ts"
+import { client } from "../lib/queue.ts";
+
+export async function handler(req: Request) {
+  await client.enqueue("email", { to: "user@example.com", subject: "Hi" });
+  return new Response("ok");
+}
+```
+
+### Clean shutdown
+
+`QueueClient` implements `Symbol.asyncDispose`, so `await using` closes the
+connection automatically:
+
+```ts
+await using client = new QueueClient(pq);
+await client.enqueue("email", payload);
+// disconnect() is called on scope exit
+```
+
+For explicit control, call `disconnect()` directly:
+
+```ts
+const client = new QueueClient(pq);
+await client.enqueue("email", payload);
+await client.disconnect();
+```
+
+## Enqueueing from multiple runtimes
+
+Panqueue clients run on Node, Bun, and Deno with the same API:
+
+<Tabs items={["Node / Bun", "Deno (JSR)"]}>
+  <Tab value="Node / Bun">
+
+    ```ts
+    import { QueueClient } from "@panqueue/client";
+    import { pq } from "./panqueue.config.ts";
+
+    await using client = new QueueClient(pq);
+    await client.enqueue("email", { to: "user@example.com", subject: "Hi" });
+    ```
+
+  </Tab>
+  <Tab value="Deno (JSR)">
+
+    ```ts
+    import { QueueClient } from "jsr:@panqueue/client";
+    import { pq } from "./panqueue.config.ts";
+
+    await using client = new QueueClient(pq);
+    await client.enqueue("email", { to: "user@example.com", subject: "Hi" });
+    ```
+
+  </Tab>
+</Tabs>
+
+## Best practices
+
+- **Enqueue from the edge.** Routes, webhooks, and cron triggers should enqueue
+  and return quickly. Keep heavy work in the worker.
+- **Reuse the client.** One `QueueClient` per process is enough. Do not create a
+  new client per request.
+- **Use `await using` for scripts.** CLI and batch scripts benefit from automatic
+  cleanup. Long-running servers can keep a single client open for the process
+  lifetime.
+- **Keep payloads small.** Store large blobs in S3 or another store, and pass a
+  reference (URL or ID) in the job payload.
+- **Validate before enqueueing.** Panqueue validates JSON serializability, but
+  business-level validation (e.g., email format) should happen in your code
+  before `enqueue`.
+
+<Callout type="warn" title="Do not put secrets in payloads">
+  Job payloads are stored in Redis as plain JSON. Treat Redis as you would treat a database: avoid
+  passing API keys, tokens, or passwords in job data.
+</Callout>
+
+## API reference
+
+### QueueClient
+
+```ts
+class QueueClient<TQueues extends QueueMap = QueueMap> {
+  constructor(config: PanqueueConfig<TQueues> | QueueClientConfig);
+
+  /** Explicitly connect to Redis. */
+  async connect(): Promise<void>;
+
+  /** Gracefully disconnect from Redis. */
+  async disconnect(): Promise<void>;
+
+  /**
+   * Enqueue a job into the specified queue.
+   * @returns The job ID.
+   */
+  async enqueue<K extends keyof TQueues & string>(
+    queueId: K,
+    data: TQueues[K],
+    options?: EnqueueOptions,
+  ): Promise<string>;
+
+  /** Access the underlying Redis connection (for internal/advanced use). */
+  get redis(): RedisConnection;
+
+  async [Symbol.asyncDispose](): Promise<void>;
+}
+```
+
+### Types
+
+```ts
+interface QueueClientConfig {
+  redis: ConnectionOptions;
+}
+
+interface EnqueueOptions {
+  retries?: number;
+  maxStalls?: number;
+}
+```
+
+| Type                | Description                                                                                         |
+| ------------------- | --------------------------------------------------------------------------------------------------- |
+| `ConnectionOptions` | URL string, `{ url }` object, or `{ host?, port?, password?, db?, tls? }` object.                   |
+| `QueueMap`          | Record mapping queue IDs to JSON-serializable payload types.                                        |
+| `JsonSerializable`  | `string \| number \| boolean \| null \| JsonSerializable[] \| { [key: string]: JsonSerializable }`. |
