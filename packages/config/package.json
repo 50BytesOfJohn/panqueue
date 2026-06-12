@@ -2,7 +2,22 @@
   "name": "@panqueue/config",
   "version": "0.0.1",
   "description": "Type-safe shared configuration for panqueue clients and workers.",
+  "keywords": [
+    "background-jobs",
+    "jobs",
+    "queue",
+    "redis",
+    "typescript"
+  ],
+  "homepage": "https://github.com/50BytesOfJohn/panqueue#readme",
+  "bugs": "https://github.com/50BytesOfJohn/panqueue/issues",
   "license": "MIT",
+  "author": "Tomasz Szczuciński (https://github.com/50BytesOfJohn)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/50BytesOfJohn/panqueue.git",
+    "directory": "packages/config"
+  },
   "files": [
     "dist"
   ],

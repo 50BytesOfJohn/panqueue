@@ -1,6 +1,11 @@
 {
   "name": "panqueue-workspace",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/50BytesOfJohn/panqueue.git"
+  },
   "scripts": {
     "build": "pnpm --filter \"./packages/*\" -r build",
     "format": "oxfmt .",
@@ -10,6 +15,7 @@
     "typecheck": "pnpm --filter \"./packages/*\" -r typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
+    "publint": "pnpm --filter \"./packages/*\" -r exec publint",
     "gen:jsr": "node scripts/gen-jsr-json.mjs",
     "docs:dev": "pnpm --filter @panqueue/docs dev",
     "docs:build": "pnpm --filter @panqueue/docs build",

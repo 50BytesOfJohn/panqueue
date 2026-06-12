@@ -2,7 +2,23 @@
   "name": "@panqueue/worker",
   "version": "0.0.1",
   "description": "Worker pool and scheduler for processing panqueue jobs from Redis.",
+  "keywords": [
+    "background-jobs",
+    "jobs",
+    "queue",
+    "redis",
+    "typescript",
+    "worker"
+  ],
+  "homepage": "https://github.com/50BytesOfJohn/panqueue#readme",
+  "bugs": "https://github.com/50BytesOfJohn/panqueue/issues",
   "license": "MIT",
+  "author": "Tomasz Szczuciński (https://github.com/50BytesOfJohn)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/50BytesOfJohn/panqueue.git",
+    "directory": "packages/worker"
+  },
   "files": [
     "dist"
   ],

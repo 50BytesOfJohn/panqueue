@@ -2,7 +2,23 @@
   "name": "@panqueue/client",
   "version": "0.0.1",
   "description": "Type-safe producer client for enqueuing panqueue jobs into Redis.",
+  "keywords": [
+    "background-jobs",
+    "jobs",
+    "producer",
+    "queue",
+    "redis",
+    "typescript"
+  ],
+  "homepage": "https://github.com/50BytesOfJohn/panqueue#readme",
+  "bugs": "https://github.com/50BytesOfJohn/panqueue/issues",
   "license": "MIT",
+  "author": "Tomasz Szczuciński (https://github.com/50BytesOfJohn)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/50BytesOfJohn/panqueue.git",
+    "directory": "packages/client"
+  },
   "files": [
     "dist"
   ],
