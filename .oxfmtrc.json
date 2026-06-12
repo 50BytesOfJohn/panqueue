@@ -21,7 +21,8 @@
     "apps/**/dist/**",
     "packages/**/dist/**",
     "benchmarks/**",
-    "benchmarks/**/package-lock.json"
+    "benchmarks/**/package-lock.json",
+    "**/CHANGELOG.md"
   ],
   "overrides": [
     {
