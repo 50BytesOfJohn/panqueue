@@ -1,3 +1,4 @@
+import type { WorkerErrorEvent } from "../define-worker.js";
 import type { BaseJobScheduler } from "../scheduler/base.js";
 
 /** Collaborators and tuning a {@link LeaseRenewer} needs. */
@@ -5,7 +6,7 @@ export interface LeaseRenewerOptions {
   scheduler: Pick<BaseJobScheduler, "extendLock">;
   leaseMs: number;
   lockRenewMs: number;
-  onError(context: string, error: unknown): void;
+  onError(event: WorkerErrorEvent): void;
 }
 
 /** Handle controlling a single claimed job's lease renewal. */
@@ -22,7 +23,7 @@ export class LeaseRenewer {
   readonly #scheduler: Pick<BaseJobScheduler, "extendLock">;
   readonly #leaseMs: number;
   readonly #lockRenewMs: number;
-  readonly #onError: (context: string, error: unknown) => void;
+  readonly #onError: (event: WorkerErrorEvent) => void;
 
   constructor(options: LeaseRenewerOptions) {
     this.#scheduler = options.scheduler;
@@ -48,17 +49,18 @@ export class LeaseRenewer {
       try {
         const ok = await this.#scheduler.extendLock(jobId, this.#leaseMs, lockToken);
         if (ok !== "extended") {
-          this.#onError(
-            `lease-lost:${jobId}`,
-            new Error(
+          this.#onError({
+            kind: "lease-lost",
+            jobId,
+            error: new Error(
               "Lease lost while job was running. Recovery may have requeued it; complete/fail will be no-ops.",
             ),
-          );
+          });
           stopped = true;
           return;
         }
       } catch (err) {
-        this.#onError(`extend:${jobId}`, err);
+        this.#onError({ kind: "lease-renew", jobId, error: err });
       }
       if (!stopped) {
         timer = setTimeout(tick, this.#lockRenewMs);

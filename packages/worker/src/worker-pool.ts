@@ -4,13 +4,19 @@ import {
   DEFAULT_COMPLETED_RETENTION,
   DEFAULT_FAILED_RETENTION,
   notifyKey,
+  PanqueueError,
   type QueueMap,
   resolveRetention,
 } from "@panqueue/core";
 
 import { isWorkerDefinition, type WorkerDefinition } from "./define-worker.js";
+import { WorkerConnectionError } from "./errors.js";
 import { WorkerRunner } from "./internal/worker-runner.js";
-import { RedisConnection, type RedisSubscriberConnection } from "./redis-connection.js";
+import {
+  type ConnectionLifecycleHooks,
+  RedisConnection,
+  type RedisSubscriberConnection,
+} from "./redis-connection.js";
 
 /** Options accepted by {@link WorkerPool.shutdown}. */
 export interface ShutdownOptions {
@@ -51,6 +57,49 @@ export interface ShutdownResult {
   requeued: number;
 }
 
+/** Which of the pool's two Redis connections an event refers to. */
+export type PoolConnection = "command" | "subscriber";
+
+/** Payload for {@link WorkerPoolEventHandlers.onConnectionError}. */
+export interface PoolConnectionErrorEvent {
+  connection: PoolConnection;
+  error: unknown;
+}
+
+/** Payload for connection lifecycle events. */
+export interface PoolConnectionEvent {
+  connection: PoolConnection;
+}
+
+/** Payload for {@link WorkerPoolEventHandlers.onNotificationsDegraded}. */
+export interface NotificationsDegradedEvent {
+  /** The last socket error observed before degrading, when available. */
+  error?: unknown;
+}
+
+/**
+ * Pool-level observability handlers for the shared Redis connections. Job
+ * lifecycle events live on the worker definitions; everything about the
+ * sockets the pool owns surfaces here. All handlers are fire-and-forget: a
+ * throwing handler is swallowed and never affects the pool.
+ */
+export interface WorkerPoolEventHandlers {
+  /** Called on every socket-level error on either connection. */
+  onConnectionError?(event: PoolConnectionErrorEvent): void;
+  /** Called when a connection is lost and a reconnect attempt is scheduled. */
+  onConnectionReconnecting?(event: PoolConnectionEvent): void;
+  /** Called when a connection is established or re-established. */
+  onConnectionReady?(event: PoolConnectionEvent): void;
+  /**
+   * Called once when the subscriber connection drops. While degraded,
+   * workers receive no pub/sub wakeups and fall back to `pollInterval`
+   * polling — jobs still process, with up to `pollInterval` extra latency.
+   */
+  onNotificationsDegraded?(event: NotificationsDegradedEvent): void;
+  /** Called when the subscriber connection recovers after degrading. */
+  onNotificationsRestored?(): void;
+}
+
 /** Options for constructing a {@link WorkerPool}. */
 export interface WorkerPoolOptions<TQueues extends QueueMap = QueueMap> {
   /** Worker definitions to materialize when the pool starts. */
@@ -60,6 +109,8 @@ export interface WorkerPoolOptions<TQueues extends QueueMap = QueueMap> {
    * `config.redis` when provided.
    */
   connection?: ConnectionOptions;
+  /** Pool-level connection event handlers for observability. */
+  events?: WorkerPoolEventHandlers;
 }
 
 /** Lifecycle states of the pool. */
@@ -85,8 +136,11 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
   readonly #connectionOptions: ConnectionOptions;
   readonly #definitions: ReadonlyArray<WorkerDefinition<TQueues>>;
   readonly #queueConfigs: Partial<Record<string, QueueConfig>>;
+  readonly #events: WorkerPoolEventHandlers;
 
   #state: PoolState = "idle";
+  #notificationsDegraded = false;
+  #lastSubscriberError: unknown;
   #startPromise: Promise<void> | null = null;
   #shutdownPromise: Promise<ShutdownResult> | null = null;
 
@@ -96,16 +150,16 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
 
   constructor(config: PanqueueConfig<TQueues>, options: WorkerPoolOptions<TQueues>) {
     if (!options.workers || options.workers.length === 0) {
-      throw new Error("WorkerPool requires at least one worker definition");
+      throw new PanqueueError("WorkerPool requires at least one worker definition");
     }
 
     const seen = new Set<string>();
     for (const def of options.workers) {
       if (!isWorkerDefinition(def)) {
-        throw new TypeError("WorkerPool workers must be created with defineWorker(...)");
+        throw new PanqueueError("WorkerPool workers must be created with defineWorker(...)");
       }
       if (seen.has(def.queueId)) {
-        throw new Error(`Duplicate worker definition for queue "${def.queueId}"`);
+        throw new PanqueueError(`Duplicate worker definition for queue "${def.queueId}"`);
       }
       seen.add(def.queueId);
     }
@@ -113,6 +167,7 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
     this.#connectionOptions = options.connection ?? config.redis;
     this.#definitions = options.workers;
     this.#queueConfigs = config.queues;
+    this.#events = options.events ?? {};
   }
 
   /** Number of registered queues. */
@@ -125,7 +180,7 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
     if (this.#state === "running") return Promise.resolve();
     if (this.#startPromise) return this.#startPromise;
     if (this.#state !== "idle") {
-      return Promise.reject(new Error(`Cannot start pool in state "${this.#state}"`));
+      return Promise.reject(new PanqueueError(`Cannot start pool in state "${this.#state}"`));
     }
 
     this.#startPromise = this.#doStart().finally(() => {
@@ -137,13 +192,13 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
   async #doStart(): Promise<void> {
     this.#state = "starting";
 
-    const redis = new RedisConnection(this.#connectionOptions);
+    const redis = new RedisConnection(this.#connectionOptions, this.#connectionHooks("command"));
     let subscriber: RedisSubscriberConnection | null = null;
     const subscribedChannels: string[] = [];
 
     try {
       await redis.connect();
-      subscriber = await redis.duplicate();
+      subscriber = await redis.duplicate(this.#subscriberHooks());
 
       const runners = this.#definitions.map((def) => {
         const rule = this.#queueConfigs[def.queueId]?.retention;
@@ -185,7 +240,60 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
         /* ignore */
       }
       this.#state = "stopped";
-      throw err;
+      if (err instanceof PanqueueError) throw err;
+      throw new WorkerConnectionError(err);
+    }
+  }
+
+  /** Lifecycle hooks routing a connection's socket events to pool handlers. */
+  #connectionHooks(connection: PoolConnection): ConnectionLifecycleHooks {
+    return {
+      onError: (error) =>
+        this.#safeEmit(() => this.#events.onConnectionError?.({ connection, error })),
+      onReconnecting: () =>
+        this.#safeEmit(() => this.#events.onConnectionReconnecting?.({ connection })),
+      onReady: () => this.#safeEmit(() => this.#events.onConnectionReady?.({ connection })),
+    };
+  }
+
+  /**
+   * Subscriber hooks additionally track notification degradation: while the
+   * subscriber socket is down, workers miss pub/sub wakeups and fall back to
+   * polling. Degraded/restored fire once per outage, not per retry.
+   */
+  #subscriberHooks(): ConnectionLifecycleHooks {
+    const base = this.#connectionHooks("subscriber");
+    return {
+      onError: (error) => {
+        this.#lastSubscriberError = error;
+        base.onError?.(error);
+      },
+      onReconnecting: () => {
+        if (!this.#notificationsDegraded) {
+          this.#notificationsDegraded = true;
+          this.#safeEmit(() =>
+            this.#events.onNotificationsDegraded?.({ error: this.#lastSubscriberError }),
+          );
+        }
+        base.onReconnecting?.();
+      },
+      onReady: () => {
+        if (this.#notificationsDegraded) {
+          this.#notificationsDegraded = false;
+          this.#lastSubscriberError = undefined;
+          this.#safeEmit(() => this.#events.onNotificationsRestored?.());
+        }
+        base.onReady?.();
+      },
+    };
+  }
+
+  /** Invoke an observability handler; handler failures never affect the pool. */
+  #safeEmit(emit: () => void): void {
+    try {
+      emit();
+    } catch {
+      /* observability handlers must not break the pool */
     }
   }
 

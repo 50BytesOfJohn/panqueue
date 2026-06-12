@@ -91,10 +91,35 @@ export interface JobAckErrorEvent<T extends JsonSerializable = JsonSerializable>
   error: unknown;
 }
 
+/**
+ * Operation during which an internal worker error occurred.
+ *
+ * - `"claim"` — claiming the next job from the queue failed.
+ * - `"lease-renew"` — extending an in-flight job's lock failed.
+ * - `"lease-lost"` — an in-flight job's lease could not be renewed because
+ *   another worker (or recovery) took it over; complete/fail will no-op.
+ * - `"recovery-sweep"` — a stalled-job recovery pass failed.
+ * - `"ack"` — sending a job's terminal complete/fail acknowledgement failed.
+ * - `"requeue"` — handing an in-flight job back during shutdown failed.
+ * - `"event-handler"` — a user-provided event handler threw or rejected.
+ */
+export type WorkerErrorKind =
+  | "claim"
+  | "lease-renew"
+  | "lease-lost"
+  | "recovery-sweep"
+  | "ack"
+  | "requeue"
+  | "event-handler";
+
 /** Payload for {@link WorkerEventHandlers.onWorkerError}. */
 export interface WorkerErrorEvent {
-  /** Where the error occurred, e.g. `"claim"` or `"extend:<jobId>"`. */
-  scope: string;
+  /** The operation that failed. */
+  kind: WorkerErrorKind;
+  /** The affected job, when the failure is job-scoped. */
+  jobId?: string;
+  /** The throwing handler's name, for kind `"event-handler"`. */
+  handlerName?: string;
   error: unknown;
 }
 
@@ -110,7 +135,7 @@ export interface StateChangeEvent {
  * All handlers are local to the worker process: they fire on the worker
  * that observed the transition, not globally across the queue. A throwing
  * or rejecting handler never affects job processing: the failure is caught
- * and reported to `onWorkerError` with scope `events:<handlerName>`.
+ * and reported to `onWorkerError` with kind `"event-handler"`.
  * Failures thrown by `onWorkerError` itself are dropped.
  */
 export interface WorkerEventHandlers<T extends JsonSerializable = JsonSerializable> {
@@ -146,7 +171,7 @@ export interface WorkerEventHandlers<T extends JsonSerializable = JsonSerializab
   /**
    * Called on internal worker errors (claiming, lease renewal, recovery
    * sweeps) and on failures thrown by other event handlers
-   * (scope `events:<handlerName>`).
+   * (kind `"event-handler"`).
    */
   onWorkerError?(event: WorkerErrorEvent): void;
   /** Called on every lifecycle state transition for this runner. */

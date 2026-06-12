@@ -3,6 +3,7 @@ import type { JobData, JobStatus } from "@panqueue/core";
 import type {
   Processor,
   WorkerDefinitionOptions,
+  WorkerErrorEvent,
   WorkerEventHandlers,
   WorkerState,
 } from "../define-worker.js";
@@ -81,7 +82,7 @@ export class WorkerRunner {
       scheduler: this.#scheduler,
       leaseMs: this.#leaseMs,
       lockRenewMs: this.#lockRenewMs,
-      onError: (scope, error) => this.#emitWorkerError(scope, error),
+      onError: (event) => this.#emitWorkerError(event),
     });
     this.#recoverySweep = new StalledRecoverySweep({
       scheduler: this.#scheduler,
@@ -89,7 +90,7 @@ export class WorkerRunner {
       batchSize: this.#recoverBatchSize,
       isActive: () => this.#state === "running",
       onRecovered: (jobs) => this.#handleRecovered(jobs),
-      onError: (scope, error) => this.#emitWorkerError(scope, error),
+      onError: (event) => this.#emitWorkerError(event),
     });
   }
 
@@ -166,7 +167,7 @@ export class WorkerRunner {
       if (r.status === "fulfilled") {
         if (r.value === "waiting") requeued++;
       } else {
-        this.#emitWorkerError(`requeue:${stillRunning[i].jobId}`, r.reason);
+        this.#emitWorkerError({ kind: "requeue", jobId: stillRunning[i].jobId, error: r.reason });
       }
     }
 
@@ -225,7 +226,7 @@ export class WorkerRunner {
         jobData = await this.#scheduler.claim(this.#leaseMs);
       } catch (err) {
         this.#semaphore.release();
-        this.#emitWorkerError("claim", err);
+        this.#emitWorkerError({ kind: "claim", error: err });
         await this.#waitForNotification();
         continue;
       }
@@ -295,7 +296,7 @@ export class WorkerRunner {
         });
         return;
       } catch (err) {
-        this.#emitWorkerError(`complete:${jobData.id}`, err);
+        this.#emitWorkerError({ kind: "ack", jobId: jobData.id, error: err });
         this.#safeEmit("onJobAckError", this.#events.onJobAckError, {
           job: jobData,
           phase: "complete",
@@ -352,7 +353,7 @@ export class WorkerRunner {
       });
       return;
     } catch (err) {
-      this.#emitWorkerError(`fail:${jobData.id}`, err);
+      this.#emitWorkerError({ kind: "ack", jobId: jobData.id, error: err });
       this.#safeEmit("onJobAckError", this.#events.onJobAckError, {
         job: jobData,
         phase: "fail",
@@ -406,21 +407,21 @@ export class WorkerRunner {
     this.#safeEmit("onStateChange", this.#events.onStateChange, { from, to });
   }
 
-  #emitWorkerError(scope: string, error: unknown): void {
-    this.#safeEmit("onWorkerError", this.#events.onWorkerError, { scope, error });
+  #emitWorkerError(event: WorkerErrorEvent): void {
+    this.#safeEmit("onWorkerError", this.#events.onWorkerError, event);
   }
 
   /**
    * Invoke a user-provided handler; handler errors must never affect jobs.
-   * Throws and rejections are reported to `onWorkerError` under an
-   * `events:<name>` scope — except failures from `onWorkerError` itself,
+   * Throws and rejections are reported to `onWorkerError` with kind
+   * `"event-handler"` — except failures from `onWorkerError` itself,
    * which are dropped to avoid recursion.
    */
   #safeEmit<E>(name: string, handler: ((event: E) => void) | undefined, event: E): void {
     if (!handler) return;
     const report = (err: unknown) => {
       if (name === "onWorkerError") return;
-      this.#emitWorkerError(`events:${name}`, err);
+      this.#emitWorkerError({ kind: "event-handler", handlerName: name, error: err });
     };
     try {
       const result = handler(event) as unknown;

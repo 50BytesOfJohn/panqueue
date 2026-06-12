@@ -15,11 +15,25 @@ export type {
   WorkerDefinition,
   WorkerDefinitionOptions,
   WorkerErrorEvent,
+  WorkerErrorKind,
   WorkerEventHandlers,
   WorkerState,
 } from "./src/define-worker.js";
 
 export { WorkerPool } from "./src/worker-pool.js";
-export type { ShutdownOptions, ShutdownResult, WorkerPoolOptions } from "./src/worker-pool.js";
+export type {
+  NotificationsDegradedEvent,
+  PoolConnection,
+  PoolConnectionErrorEvent,
+  PoolConnectionEvent,
+  ShutdownOptions,
+  ShutdownResult,
+  WorkerPoolEventHandlers,
+  WorkerPoolOptions,
+} from "./src/worker-pool.js";
+
+export { WorkerConnectionError } from "./src/errors.js";
 
 export type { PanqueueConfig, QueueConfig } from "@panqueue/config";
+
+export { PanqueueError, SerializationError } from "@panqueue/core";

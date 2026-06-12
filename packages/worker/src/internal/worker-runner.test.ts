@@ -328,7 +328,7 @@ describe("WorkerRunner job events", () => {
 });
 
 describe("WorkerRunner event handler failures", () => {
-  it("reports a throwing event handler to onWorkerError with an events scope", async () => {
+  it("reports a throwing event handler to onWorkerError with an event-handler kind", async () => {
     // Arrange
     const errors: WorkerErrorEvent[] = [];
     const runner = makeRunner({
@@ -346,7 +346,8 @@ describe("WorkerRunner event handler failures", () => {
     // Assert
     await captured(errors);
     expect(errors[0]).toMatchObject({
-      scope: "events:onJobCompleted",
+      kind: "event-handler",
+      handlerName: "onJobCompleted",
       error: new Error("hook boom"),
     });
   });
@@ -366,7 +367,7 @@ describe("WorkerRunner event handler failures", () => {
 
     // Assert
     await captured(errors);
-    expect(errors[0].scope).toBe("events:onJobCompleted");
+    expect(errors[0]).toMatchObject({ kind: "event-handler", handlerName: "onJobCompleted" });
   });
 
   it("drops failures thrown by onWorkerError itself", async () => {

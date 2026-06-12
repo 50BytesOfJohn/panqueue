@@ -1,3 +1,4 @@
+import type { WorkerErrorEvent } from "../define-worker.js";
 import type { BaseJobScheduler, RecoveredJob } from "../scheduler/base.js";
 
 /** Collaborators and tuning a {@link StalledRecoverySweep} needs. */
@@ -8,7 +9,7 @@ export interface StalledRecoverySweepOptions {
   /** Whether sweeping should currently run (e.g. runner still "running"). */
   isActive(): boolean;
   onRecovered(jobs: RecoveredJob[]): void;
-  onError(context: string, error: unknown): void;
+  onError(event: WorkerErrorEvent): void;
 }
 
 /**
@@ -21,7 +22,7 @@ export class StalledRecoverySweep {
   readonly #batchSize: number;
   readonly #isActive: () => boolean;
   readonly #onRecovered: (jobs: RecoveredJob[]) => void;
-  readonly #onError: (context: string, error: unknown) => void;
+  readonly #onError: (event: WorkerErrorEvent) => void;
 
   #timer: ReturnType<typeof setInterval> | null = null;
 
@@ -59,7 +60,7 @@ export class StalledRecoverySweep {
 
       this.#onRecovered(recovered);
     } catch (err) {
-      this.#onError("recover", err);
+      this.#onError({ kind: "recovery-sweep", error: err });
     }
   }
 }
