@@ -407,24 +407,41 @@ export class WorkerRunner {
     this.#safeEmit("onStateChange", this.#events.onStateChange, { from, to });
   }
 
+  /**
+   * Invoke the `onWorkerError` handler. Its own throws and rejections are
+   * dropped rather than reported, since reporting back into `onWorkerError`
+   * would recurse. This is the only handler that must not feed itself, which
+   * is why it bypasses `#safeEmit`.
+   */
   #emitWorkerError(event: WorkerErrorEvent): void {
-    this.#safeEmit("onWorkerError", this.#events.onWorkerError, event);
+    const handler = this.#events.onWorkerError;
+    if (!handler) return;
+    try {
+      const result: unknown = handler(event);
+      if (result instanceof Promise) result.catch(() => {});
+    } catch {
+      // dropped: see above
+    }
   }
 
   /**
    * Invoke a user-provided handler; handler errors must never affect jobs.
    * Throws and rejections are reported to `onWorkerError` with kind
-   * `"event-handler"` — except failures from `onWorkerError` itself,
-   * which are dropped to avoid recursion.
+   * `"event-handler"`. The handler's return value is genuinely opaque here —
+   * we only probe it for a promise to observe rejections — so it is typed
+   * `unknown` rather than the handler's declared `void`.
    */
-  #safeEmit<E>(name: string, handler: ((event: E) => void) | undefined, event: E): void {
+  #safeEmit<E>(
+    name: keyof WorkerEventHandlers,
+    handler: ((event: E) => unknown) | undefined,
+    event: E,
+  ): void {
     if (!handler) return;
     const report = (err: unknown) => {
-      if (name === "onWorkerError") return;
       this.#emitWorkerError({ kind: "event-handler", handlerName: name, error: err });
     };
     try {
-      const result = handler(event) as unknown;
+      const result = handler(event);
       if (result instanceof Promise) result.catch(report);
     } catch (err) {
       report(err);

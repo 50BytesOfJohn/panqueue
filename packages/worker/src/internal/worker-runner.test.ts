@@ -357,7 +357,7 @@ describe("WorkerRunner event handler failures", () => {
     const errors: WorkerErrorEvent[] = [];
     const runner = makeRunner({
       events: {
-        onJobCompleted: () => Promise.reject(new Error("async hook boom")) as unknown as void,
+        onJobCompleted: () => Promise.reject(new Error("async hook boom")),
         onWorkerError: (e) => errors.push(e),
       },
     });
@@ -391,6 +391,54 @@ describe("WorkerRunner event handler failures", () => {
     // Assert — the job still completes despite both handlers throwing.
     await captured(completed);
     expect(completed[0].job.status).toBe("completed");
+  });
+
+  it("drops async rejections from onWorkerError itself without recursing", async () => {
+    // Arrange
+    const completed: JobCompletedEvent[] = [];
+    const runner = makeRunner({
+      events: {
+        onJobStarted: () => {
+          throw new Error("hook boom");
+        },
+        onWorkerError: () => Promise.reject(new Error("reporter async boom")),
+        onJobCompleted: (e) => completed.push(e),
+      },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert — the rejection is swallowed (no unhandled rejection, no
+    // re-entry into onWorkerError) and the job still completes.
+    await captured(completed);
+    expect(completed[0].job.status).toBe("completed");
+  });
+
+  it("accepts handlers that return a non-void value (void leniency is preserved)", async () => {
+    // Arrange — handlers returning `boolean` / `Promise<boolean>` must still
+    // satisfy the public `(event) => void` signature. This guards against
+    // re-tightening to `void | Promise<void>`, which would reject them.
+    const completed: JobCompletedEvent[] = [];
+    const errors: WorkerErrorEvent[] = [];
+    const runner = makeRunner({
+      events: {
+        onJobStarted: () => true,
+        onJobCompleted: (e) => {
+          completed.push(e);
+          return Promise.resolve(42);
+        },
+        onWorkerError: (e) => errors.push(e),
+      },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert — the job completes and no handler error is reported.
+    await captured(completed);
+    expect(completed[0].job.status).toBe("completed");
+    expect(errors).toHaveLength(0);
   });
 });
 

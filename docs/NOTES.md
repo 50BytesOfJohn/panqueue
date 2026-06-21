@@ -1,0 +1,3 @@
+# Notes
+
+- Worker wakeups use regular `PUBLISH`/`SUBSCRIBE` on `{q:<queueId>}:notify` (fire-and-forget; reliability comes from leases + stalled-recovery + `pollInterval`, not the channel). In Redis Cluster, `PUBLISH` fans out to every shard via the cluster bus; when targeting clusters at scale, switch to sharded pub/sub (`SPUBLISH`/`SSUBSCRIBE`, Redis 7.0+) — the channel name hashes to a slot like a key, so the message stays on the shard that owns the queue data and its subscribers. Same semantics, no cluster-bus flood. Mostly a command-name swap plus making the client cluster-aware; works fine on standalone Redis too. Keep regular pub/sub for v0.1; revisit when clustering is a real target.

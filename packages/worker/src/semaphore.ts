@@ -13,7 +13,6 @@ export class Semaphore {
   #max: number;
   #current: number = 0;
   #waiters: Waiter[] = [];
-  #drainWaiters: Array<() => void> = [];
 
   constructor(max: number) {
     if (max < 1) throw new RangeError("Semaphore max must be >= 1");
@@ -75,21 +74,6 @@ export class Semaphore {
       next.resolve();
     } else {
       this.#current--;
-      if (this.#current === 0) {
-        for (const resolve of this.#drainWaiters) resolve();
-        this.#drainWaiters = [];
-      }
     }
-  }
-
-  /** Resolves when all permits have been returned (current === 0). */
-  drain(): Promise<void> {
-    if (this.#current === 0 && this.#waiters.length === 0) {
-      return Promise.resolve();
-    }
-
-    return new Promise<void>((resolve) => {
-      this.#drainWaiters.push(resolve);
-    });
   }
 }

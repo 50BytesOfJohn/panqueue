@@ -26,6 +26,10 @@ changes, change core stuff if needed.
 - In docs, always keep the current shape of what we decided. No bloat of, why we
   won't use other thing etc. Just the clean and clear current state of art.
 
+# Notes
+
+- Redis connection is intentionally duplicated in worker and client, and not shared via core or shared package.
+
 # Codex
 
 - Always run pnpm and other commands that requires network outside of sandbox, otherwise it won't work and can break things.

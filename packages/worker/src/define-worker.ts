@@ -119,7 +119,7 @@ export interface WorkerErrorEvent {
   /** The affected job, when the failure is job-scoped. */
   jobId?: string;
   /** The throwing handler's name, for kind `"event-handler"`. */
-  handlerName?: string;
+  handlerName?: keyof WorkerEventHandlers;
   error: unknown;
 }
 
@@ -137,6 +137,11 @@ export interface StateChangeEvent {
  * or rejecting handler never affects job processing: the failure is caught
  * and reported to `onWorkerError` with kind `"event-handler"`.
  * Failures thrown by `onWorkerError` itself are dropped.
+ *
+ * Handlers may be async, but are invoked fire-and-forget: the worker does
+ * not await them, so they cannot delay or block job processing. A returned
+ * promise is observed only for rejection, which is routed to `onWorkerError`
+ * as above.
  */
 export interface WorkerEventHandlers<T extends JsonSerializable = JsonSerializable> {
   /** Called when a claimed job begins processing. */
