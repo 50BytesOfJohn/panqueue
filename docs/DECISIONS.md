@@ -3,6 +3,39 @@
 This file records rationale and dated decisions. It is not the source of truth
 for behavior; `SPEC.md` is authoritative.
 
+## 2026-07-01: Corrupt Job Pointers — Surface Once, Out of Core
+
+### Decision
+
+- A job whose pointer survives (in `waiting`/`active`) but whose hash is gone
+  is "corrupt" and unrecoverable. Core surfaces it exactly once via
+  `onWorkerError` with `kind: "corrupt"` and the orphaned `jobId`, then removes
+  the pointer (the claim script RPOPs it; the recover sweep ZREMs it from
+  `active`).
+- The claim loop does not park after a corrupt entry — the dangling pointer is
+  already RPOP'd, so the loop continues immediately to avoid stalling healthy
+  jobs behind it for a poll interval. Each corrupt entry is self-terminating
+  (removed on claim/recover), so there is no infinite-loop risk.
+- No synthesized `onJobFailed`: the hash is gone, so any `JobData` would be
+  fiction that crashes handlers. Corrupt surfaces only through
+  `onWorkerError`.
+- No corrupt ZSET, dead-letter store, `listCorrupt`, `inspect`, or `replay` in
+  core. Durable capture is the developer's via the `onWorkerError` handler.
+  Observability is out of core by design; a future optional plugin layered on
+  the events is the path if richer tooling is ever wanted.
+
+### Why
+
+- The claim script previously returned a stringly-typed error
+  (`PANQUEUE_MISSING_JOB_DATA`) that the claim loop caught as a generic claim
+  failure and parked behind for a poll interval, stalling healthy jobs. The
+  recover sweep silently dropped entries whose hash was missing (a missing
+  `else` on the `ZREM == 1` block). Both hid data loss behind a generic error
+  and a silent drop.
+- A first-class `corrupt` kind gives developers one clear event to persist the
+  orphaned `jobId` themselves, without core owning a store that grows
+  unbounded and without fabricating job data.
+
 ## 2026-06-11: Event Payload Refinement (timing, no attempt copies, hook-failure reporting)
 
 ### Decision

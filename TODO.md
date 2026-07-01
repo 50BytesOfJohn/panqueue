@@ -39,11 +39,11 @@ Focused v0.1 TODO list from the current review and product decisions.
   - Failure analytics are out of scope: the worker event hooks are the
     documented path to Sentry/PostHog/logs.
 
-- [ ] Make missing job data handling non-lossy.
-  - The claim script must not permanently drop a waiting-list entry when its job
-    hash is missing.
-  - Decide whether corrupted entries are left in place, moved to a dead/corrupt
-    set, or repaired by a cleanup path.
+- [x] Make missing job data handling non-lossy.
+  - A corrupt job (pointer survived, hash gone) is surfaced once via
+    `onWorkerError` with `kind: "corrupt"`; the pointer is removed and the
+    claim loop continues without parking. Durable capture is the developer's
+    via the event — no core-owned dead-letter store.
 
 ## v0.1 API Alignment
 

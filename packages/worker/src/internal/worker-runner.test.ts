@@ -5,6 +5,7 @@ import type {
   JobErrorEvent,
   JobFailedEvent,
   JobRetryEvent,
+  JobStartedEvent,
   JobStaleEvent,
   Processor,
   WorkerErrorEvent,
@@ -48,6 +49,8 @@ interface HarnessOptions {
   completeResult?: string;
   /** Claimed job hash. Pass null to never claim. Default: jobHash(). */
   claim?: string[] | null;
+  /** Sequence of claim results consumed in order. Overrides `claim`. */
+  claims?: (string[] | null)[];
   /** Entries returned by the first recovery sweep; enables the sweep timer. */
   recover?: unknown[];
 }
@@ -65,10 +68,14 @@ afterEach(async () => {
 /** Build a runner over a scripted fake client. Claims at most one job. */
 function makeRunner(options: HarnessOptions): WorkerRunner {
   let claimed = false;
+  let claimIndex = 0;
   let recovered = false;
   const client: PanqueueWorkerClient = {
     disconnect: async () => {},
     claimGlobal: async () => {
+      if (options.claims) {
+        return options.claims[claimIndex++] ?? null;
+      }
       if (claimed || options.claim === null) return null;
       claimed = true;
       return options.claim ?? jobHash();
@@ -475,5 +482,62 @@ describe("WorkerRunner recovery sweep events", () => {
     // Assert
     await captured(events);
     expect(events[0]).toMatchObject({ cause: "stalled", job: { runs: 3 } });
+  });
+});
+
+describe("WorkerRunner corrupt job handling", () => {
+  it("emits onWorkerError(kind:corrupt) for a corrupt claim and continues without parking", async () => {
+    // Arrange — corrupt entry first, then a healthy job. If the loop parked
+    // after the corrupt entry, the healthy job would not be picked up within
+    // the (large) poll interval.
+    const errors: WorkerErrorEvent[] = [];
+    const started: JobStartedEvent[] = [];
+    const processor = vi.fn();
+    const runner = makeRunner({
+      processor,
+      claims: [["corrupt", "jX"], jobHash({ id: "j2" })],
+      events: {
+        onWorkerError: (e) => errors.push(e),
+        onJobStarted: (e) => started.push(e),
+      },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert — the corrupt entry is surfaced once; the loop releases the
+    // semaphore and re-claims immediately, so the healthy job starts.
+    await captured(errors);
+    expect(errors[0]).toMatchObject({ kind: "corrupt", jobId: "jX" });
+    await captured(started);
+    expect(started[0].job.id).toBe("j2");
+    expect(processor).toHaveBeenCalledTimes(1);
+    expect(processor).toHaveBeenCalledWith(expect.objectContaining({ id: "j2" }));
+  });
+
+  it("emits onWorkerError(kind:corrupt) for a corrupt recovered job with no retry/failed", async () => {
+    // Arrange
+    const errors: WorkerErrorEvent[] = [];
+    const retries: JobRetryEvent[] = [];
+    const failures: JobFailedEvent[] = [];
+    const runner = makeRunner({
+      claim: null,
+      recover: [["corrupt", "jY"]],
+      events: {
+        onWorkerError: (e) => errors.push(e),
+        onJobRetry: (e) => retries.push(e),
+        onJobFailed: (e) => failures.push(e),
+      },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert — corrupt recovered entries go to onWorkerError only; the hash
+    // is gone, so no onJobRetry/onJobFailed can be synthesized.
+    await captured(errors);
+    expect(errors[0]).toMatchObject({ kind: "corrupt", jobId: "jY" });
+    expect(retries).toHaveLength(0);
+    expect(failures).toHaveLength(0);
   });
 });

@@ -8,7 +8,7 @@ import type {
   WorkerState,
 } from "../define-worker.js";
 import type { PanqueueWorkerClient } from "../redis-connection.js";
-import type { BaseJobScheduler, QueueRetention, RecoveredJob } from "../scheduler/base.js";
+import type { BaseJobScheduler, ClaimResult, QueueRetention, RecoveredJob } from "../scheduler/base.js";
 import { GlobalJobScheduler } from "../scheduler/global.js";
 import { Semaphore } from "../semaphore.js";
 import { LeaseRenewer, type LeaseRenewal } from "./lease-renewer.js";
@@ -221,7 +221,7 @@ export class WorkerRunner {
         break;
       }
 
-      let jobData: JobData | null;
+      let jobData: ClaimResult;
       try {
         jobData = await this.#scheduler.claim(this.#leaseMs);
       } catch (err) {
@@ -234,6 +234,14 @@ export class WorkerRunner {
       if (jobData === null) {
         this.#semaphore.release();
         await this.#waitForNotification();
+        continue;
+      }
+
+      // Corrupt: pointer survived, hash gone. Already RPOP'd, so do not park
+      // — emit, release, and continue so healthy jobs aren't stalled behind it.
+      if ("corrupt" in jobData) {
+        this.#emitWorkerError({ kind: "corrupt", jobId: jobData.jobId });
+        this.#semaphore.release();
         continue;
       }
 
@@ -368,7 +376,13 @@ export class WorkerRunner {
    * that swept the queue, which is not necessarily the one that ran the job.
    */
   #handleRecovered(jobs: RecoveredJob[]): void {
-    for (const { outcome, job } of jobs) {
+    for (const entry of jobs) {
+      // Corrupt: hash gone, no snapshot to fold into retry/failed events.
+      if ("corrupt" in entry) {
+        this.#emitWorkerError({ kind: "corrupt", jobId: entry.jobId });
+        continue;
+      }
+      const { outcome, job } = entry;
       const error = new Error(job.failedReason ?? "lease expired");
       if (outcome === "waiting") {
         this.#safeEmit("onJobRetry", this.#events.onJobRetry, {

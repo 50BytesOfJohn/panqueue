@@ -23,9 +23,10 @@ export type ClaimGlobalScript = PanqueueRedisScript<ClaimGlobalScriptArguments>;
  * 3. Generate a fresh lockToken and ZADD into the active ZSET by lease deadline
  * 4. Return the full job hash via HGETALL
  *
- * Returns the job hash as a flat `[field, value, …]` array, or nil if the
- * waiting list is empty. The payload field is returned verbatim — Lua never
- * decodes it.
+ * Returns the job hash as a flat `[field, value, …]` array, `nil` if the
+ * waiting list is empty, or `{'corrupt', jobId}` when the waiting-list
+ * pointer survived but its job hash is gone (unrecoverable). The payload
+ * field is returned verbatim — Lua never decodes it.
  */
 export const CLAIM_GLOBAL_SCRIPT: ClaimGlobalScript = defineScript({
   NUMBER_OF_KEYS: 2,
@@ -37,7 +38,7 @@ end
 
 local jobKey = ARGV[2] .. ':job:' .. jobId
 if redis.call('EXISTS', jobKey) == 0 then
-  return redis.error_reply('PANQUEUE_MISSING_JOB_DATA: ' .. jobId)
+  return {'corrupt', jobId}
 end
 
 local t = redis.call('TIME')

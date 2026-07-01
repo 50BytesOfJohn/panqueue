@@ -102,6 +102,9 @@ export interface JobAckErrorEvent<T extends JsonSerializable = JsonSerializable>
  * - `"ack"` — sending a job's terminal complete/fail acknowledgement failed.
  * - `"requeue"` — handing an in-flight job back during shutdown failed.
  * - `"event-handler"` — a user-provided event handler threw or rejected.
+ * - `"corrupt"` — a job pointer survived (in waiting/active) but its hash is
+ *   gone; the job is unrecoverable. Core surfaces the jobId once and removes
+ *   the pointer; persist it yourself if you need a durable record.
  */
 export type WorkerErrorKind =
   | "claim"
@@ -110,7 +113,8 @@ export type WorkerErrorKind =
   | "recovery-sweep"
   | "ack"
   | "requeue"
-  | "event-handler";
+  | "event-handler"
+  | "corrupt";
 
 /** Payload for {@link WorkerEventHandlers.onWorkerError}. */
 export interface WorkerErrorEvent {
@@ -120,7 +124,12 @@ export interface WorkerErrorEvent {
   jobId?: string;
   /** The throwing handler's name, for kind `"event-handler"`. */
   handlerName?: keyof WorkerEventHandlers;
-  error: unknown;
+  /**
+   * The thrown value, for kinds that wrap a caught error. Absent for
+   * `"corrupt"`, which surfaces a condition (pointer survived, hash gone)
+   * rather than a thrown value.
+   */
+  error?: unknown;
 }
 
 /** Payload for {@link WorkerEventHandlers.onStateChange}. */

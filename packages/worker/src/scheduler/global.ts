@@ -19,6 +19,9 @@ export class GlobalJobScheduler<
     if (!Array.isArray(result)) {
       throw new Error(`Unexpected claim result: ${String(result)}`);
     }
+    // Detect corrupt before deserializeJobHash: the hash is gone, so the
+    // reply is ['corrupt', jobId], not field/value pairs.
+    if (result[0] === "corrupt") return { corrupt: true, jobId: result[1] };
     return deserializeJobHash<T>(result as string[]);
   }
 }

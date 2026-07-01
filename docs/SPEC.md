@@ -304,6 +304,19 @@ harmless — each check-and-move either succeeds or no-ops.
 When a job fails, the job's Redis hash is updated with error metadata and
 failure timestamp. This data persists for operational inspection and debugging.
 
+### Corrupt Job Pointers
+
+A corrupt job is one whose pointer (a `jobId` in the `waiting` list or `active`
+ZSET) survives but whose per-job hash is gone. The job is unrecoverable: there
+is no payload to run, no counters to increment, and no status to transition.
+
+Core surfaces a corrupt job exactly once via `onWorkerError` with
+`kind: "corrupt"` and the orphaned `jobId`, and removes the pointer (the claim
+script RPOPs it; the recover sweep ZREMs it from `active`). It does not park
+the claim loop, synthesize an `onJobFailed`, or move the entry to a dead-letter
+store. Durable capture (logging, alerting, replay) is the developer's concern
+via the event handler — observability storage is out of core by design.
+
 ### Shutdown
 
 v0.1 ships two shutdown modes; **force is the default**.
@@ -398,7 +411,6 @@ job.
 ### v0.3 — Advanced
 
 - Priorities
-- Dead letter queues
 - Rate limiting (composable constraint, orthogonal to concurrency scope — see
   Decisions)
 - Event streaming (Redis Streams)

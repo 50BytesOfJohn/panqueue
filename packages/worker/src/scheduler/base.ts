@@ -24,16 +24,33 @@ export type FailResult = "waiting" | "failed" | "stale" | "missing";
 export type RequeueActiveResult = "waiting" | "stale" | "missing";
 /** Outcome of an extendLock() call. */
 export type ExtendLockResult = "extended" | "stale" | "missing";
-/** Outcome of a claim call. */
-export type ClaimResult<T extends JsonSerializable = JsonSerializable> = JobData<T> | null;
 
-/** A stalled job processed by a recovery sweep. */
-export interface RecoveredJob<T extends JsonSerializable = JsonSerializable> {
-  /** "waiting" when requeued for another attempt; "failed" when terminal. */
-  outcome: "waiting" | "failed";
-  /** Job snapshot taken inside the sweep, before retention could delete it. */
-  job: JobData<T>;
+/**
+ * A job whose pointer survived (in waiting/active) but whose hash is gone.
+ * Unrecoverable: core surfaces the jobId once via `onWorkerError`
+ * (kind `"corrupt"`) and removes the pointer; durable capture is the
+ * developer's via the event.
+ */
+export interface CorruptJob {
+  /** Discriminant: always `true`. */
+  corrupt: true;
+  /** The orphaned job ID whose hash no longer exists. */
+  jobId: string;
 }
+
+/** Outcome of a claim call. */
+export type ClaimResult<T extends JsonSerializable = JsonSerializable> =
+  | JobData<T>
+  | CorruptJob
+  | null;
+
+/**
+ * A stalled job processed by a recovery sweep. Either a recoverable snapshot
+ * (requeued or terminally failed) or a {@link CorruptJob} whose hash was gone.
+ */
+export type RecoveredJob<T extends JsonSerializable = JsonSerializable> =
+  | { outcome: "waiting" | "failed"; job: JobData<T> }
+  | CorruptJob;
 
 /**
  * Abstract base class for Redis job scheduling operations.
@@ -162,6 +179,12 @@ function parseRecoveredJobs<T extends JsonSerializable>(result: unknown): Recove
       throw new Error(`Unexpected recover item: ${String(item)}`);
     }
     const [outcome, ...flat] = item as string[];
+    // Detect corrupt before deserializeJobHash: the hash is gone, so flat
+    // carries only the jobId, not field/value pairs.
+    if (outcome === "corrupt") {
+      recovered.push({ corrupt: true, jobId: flat[0] });
+      continue;
+    }
     if (outcome !== "waiting" && outcome !== "failed") {
       throw new Error(`Unexpected recover outcome: ${String(outcome)}`);
     }
