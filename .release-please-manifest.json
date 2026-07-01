@@ -2,5 +2,5 @@
   "packages/core": "0.0.2",
   "packages/config": "0.0.2",
   "packages/client": "0.0.2",
-  "packages/worker": "0.0.2"
+  "packages/worker": "0.0.3"
 }

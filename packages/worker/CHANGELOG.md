@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.0.3](https://github.com/50BytesOfJohn/panqueue/compare/worker-v0.0.2...worker-v0.0.3) (2026-07-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **worker:** surface corrupt job pointers once via onWorkerError
+
+### Features
+
+* **worker:** surface corrupt job pointers once via onWorkerError ([312123e](https://github.com/50BytesOfJohn/panqueue/commit/312123e61a683abef5960221d2c3eeb8e715c774))
+
 ## [0.0.2](https://github.com/50BytesOfJohn/panqueue/compare/worker-v0.0.1...worker-v0.0.2) (2026-06-12)
 
 
