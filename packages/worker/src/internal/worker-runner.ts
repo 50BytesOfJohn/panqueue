@@ -8,7 +8,12 @@ import type {
   WorkerState,
 } from "../define-worker.js";
 import type { PanqueueWorkerClient } from "../redis-connection.js";
-import type { BaseJobScheduler, ClaimResult, QueueRetention, RecoveredJob } from "../scheduler/base.js";
+import type {
+  BaseJobScheduler,
+  ClaimResult,
+  QueueRetention,
+  RecoveredJob,
+} from "../scheduler/base.js";
 import { GlobalJobScheduler } from "../scheduler/global.js";
 import { Semaphore } from "../semaphore.js";
 import { LeaseRenewer, type LeaseRenewal } from "./lease-renewer.js";

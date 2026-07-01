@@ -131,15 +131,11 @@ It enqueues many normal Panqueue jobs, waits for all required children to finish
 and returns their results.
 
 ```ts
-const results = await ctx.map(
-  "process-image",
-  images,
-  {
-    key: (image) => image.id,
-    input: (image) => ({ imageId: image.id }),
-    parallelism: 5,
-  },
-);
+const results = await ctx.map("process-image", images, {
+  key: (image) => image.id,
+  input: (image) => ({ imageId: image.id }),
+  parallelism: 5,
+});
 ```
 
 The queue still owns global execution behavior. `ctx.map` only adds the local
