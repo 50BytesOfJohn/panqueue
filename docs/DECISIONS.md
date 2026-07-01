@@ -338,7 +338,7 @@ for behavior; `SPEC.md` is authoritative.
 - Each feature's Redis cost is additive: the base enqueue path is 3 ops (HSET +
   LPUSH + PUBLISH). Optional features (delays, priorities, rate limiting) add
   ops only when enabled on a queue.
-- All Lua scripts use `defineScript` from node-redis v5, registered via
+- All Lua scripts use `defineScript` from node-redis v6, registered via
   `createClient({ scripts })`. Scripts are hardcoded per package (client
   scripts, worker scripts) — not configurable.
 - The framework automatically uses EVALSHA (40-byte SHA1 hash) instead of

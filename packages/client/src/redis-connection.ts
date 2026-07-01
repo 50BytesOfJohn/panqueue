@@ -108,6 +108,9 @@ export class RedisConnection {
     const base = buildClientOptions(this.#options);
     const client = createClient({
       ...base,
+      // RESP2 is required: Lua scripts return HGETALL as flat arrays, and RESP3
+      // would decode them as Maps (breaking Array.isArray checks in schedulers).
+      RESP: 2,
       scripts: CLIENT_SCRIPTS,
       disableOfflineQueue: true,
       socket: {

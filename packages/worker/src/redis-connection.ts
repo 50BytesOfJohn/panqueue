@@ -92,6 +92,9 @@ async function openRawClient(options: ConnectionOptions, hooks: ConnectionLifecy
   const base = buildClientOptions(options);
   const client = createClient({
     ...base,
+    // RESP2 is required: Lua scripts return HGETALL as flat arrays, and RESP3
+    // would decode them as Maps (breaking Array.isArray checks in schedulers).
+    RESP: 2,
     scripts: WORKER_SCRIPTS,
     socket: {
       ...base.socket,
