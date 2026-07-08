@@ -1,6 +1,7 @@
 import type { JobData, JobStatus } from "@panqueue/core";
 
 import type {
+  JobAckPhase,
   Processor,
   WorkerDefinitionOptions,
   WorkerErrorEvent,
@@ -11,6 +12,8 @@ import type { PanqueueWorkerClient } from "../redis-connection.js";
 import type {
   BaseJobScheduler,
   ClaimResult,
+  CompleteResult,
+  FailResult,
   QueueRetention,
   RecoveredJob,
 } from "../scheduler/base.js";
@@ -25,6 +28,9 @@ interface InFlightEntry {
   lockToken: string;
   stopRenewer: () => void;
 }
+
+type AckResult = CompleteResult | FailResult;
+type SuccessfulAckResult = Exclude<AckResult, "stale" | "missing">;
 
 /** Result of a force-requeue handoff. */
 export interface ForceRequeueResult {
@@ -63,6 +69,7 @@ export class WorkerRunner {
   #state: WorkerState = "idle";
   #claimLoopPromise: Promise<void> | null = null;
   #wakeResolve: (() => void) | null = null;
+  #wakePending = false;
 
   constructor(
     queueId: string,
@@ -127,6 +134,11 @@ export class WorkerRunner {
     if (resolve) {
       this.#wakeResolve = null;
       resolve();
+    } else {
+      // Wake arrived while no waiter was parked (e.g. PUBLISH landed between
+      // claim() returning null and #waitForNotification installing the
+      // resolver). Remember it so the next wait returns immediately.
+      this.#wakePending = true;
     }
   }
 
@@ -286,94 +298,89 @@ export class WorkerRunner {
     const timing = { startedAt, durationMs: Math.round(performance.now() - startedTick) };
 
     if (!handlerThrew) {
-      try {
-        const result = await this.#scheduler.complete(jobData.id, lockToken);
-        if (result === "completed") {
-          this.#safeEmit("onJobCompleted", this.#events.onJobCompleted, {
-            job: settledSnapshot(jobData, "completed"),
-            timing,
-          });
-          return;
-        }
-        if (result === "stale") {
-          this.#safeEmit("onJobStale", this.#events.onJobStale, {
-            job: jobData,
-            phase: "complete",
-          });
-          return;
-        }
-        this.#safeEmit("onJobAckError", this.#events.onJobAckError, {
-          job: jobData,
-          phase: "complete",
-          error: result,
-        });
-        return;
-      } catch (err) {
-        this.#emitWorkerError({ kind: "ack", jobId: jobData.id, error: err });
-        this.#safeEmit("onJobAckError", this.#events.onJobAckError, {
-          job: jobData,
-          phase: "complete",
-          error: err,
-        });
-        return;
-      }
+      const result = await this.#acknowledgeJob(jobData, "complete", () =>
+        this.#scheduler.complete(jobData.id, lockToken),
+      );
+      if (result !== "completed") return;
+
+      this.#safeEmit("onJobCompleted", this.#events.onJobCompleted, {
+        job: settledSnapshot(jobData, result),
+        timing,
+      });
+      return;
     }
 
     const message = handlerError instanceof Error ? handlerError.message : String(handlerError);
+    const result = await this.#acknowledgeJob(jobData, "fail", () =>
+      this.#scheduler.fail(jobData.id, message, lockToken),
+    );
+    if (result !== "waiting" && result !== "failed") return;
+
+    // The snapshot predates the fail script; fold its durable writes in
+    // so handlers see authoritative counters and status.
+    const failures = jobData.failures + 1;
+    const job: JobData = {
+      ...settledSnapshot(jobData, result),
+      failures,
+      failureKind: "handler",
+      failedReason: message,
+      lastError: message,
+    };
+    this.#safeEmit("onJobError", this.#events.onJobError, {
+      job,
+      error: handlerError,
+      willRetry: result === "waiting",
+      timing,
+    });
+    if (result === "waiting") {
+      this.#safeEmit("onJobRetry", this.#events.onJobRetry, {
+        job,
+        error: handlerError,
+        retriesLeft: Math.max(0, job.maxRetries - failures),
+        cause: "handler",
+      });
+    } else {
+      this.#safeEmit("onJobFailed", this.#events.onJobFailed, {
+        job,
+        error: handlerError,
+        cause: "handler",
+      });
+    }
+  }
+
+  async #acknowledgeJob(
+    job: JobData,
+    phase: JobAckPhase,
+    acknowledge: () => Promise<AckResult>,
+  ): Promise<SuccessfulAckResult | null> {
     try {
-      const result = await this.#scheduler.fail(jobData.id, message, lockToken);
-      if (result === "waiting" || result === "failed") {
-        // The snapshot predates the fail script; fold its durable writes in
-        // so handlers see authoritative counters and status.
-        const failures = jobData.failures + 1;
-        const job: JobData = {
-          ...settledSnapshot(jobData, result),
-          failures,
-          failureKind: "handler",
-          failedReason: message,
-          lastError: message,
-        };
-        this.#safeEmit("onJobError", this.#events.onJobError, {
-          job,
-          error: handlerError,
-          willRetry: result === "waiting",
-          timing,
-        });
-        if (result === "waiting") {
-          this.#safeEmit("onJobRetry", this.#events.onJobRetry, {
-            job,
-            error: handlerError,
-            retriesLeft: Math.max(0, job.maxRetries - failures),
-            cause: "handler",
-          });
-        } else {
-          this.#safeEmit("onJobFailed", this.#events.onJobFailed, {
-            job,
-            error: handlerError,
-            cause: "handler",
-          });
-        }
-        return;
-      }
+      const result = await acknowledge();
       if (result === "stale") {
-        this.#safeEmit("onJobStale", this.#events.onJobStale, { job: jobData, phase: "fail" });
-        return;
+        this.#safeEmit("onJobStale", this.#events.onJobStale, { job, phase });
+        return null;
       }
+
+      if (
+        (phase === "complete" && result === "completed") ||
+        (phase === "fail" && (result === "waiting" || result === "failed"))
+      ) {
+        return result;
+      }
+
       this.#safeEmit("onJobAckError", this.#events.onJobAckError, {
-        job: jobData,
-        phase: "fail",
+        job,
+        phase,
         error: result,
       });
-      return;
-    } catch (err) {
-      this.#emitWorkerError({ kind: "ack", jobId: jobData.id, error: err });
+    } catch (error) {
+      this.#emitWorkerError({ kind: "ack", jobId: job.id, error });
       this.#safeEmit("onJobAckError", this.#events.onJobAckError, {
-        job: jobData,
-        phase: "fail",
-        error: err,
+        job,
+        phase,
+        error,
       });
-      return;
     }
+    return null;
   }
 
   /**
@@ -407,6 +414,10 @@ export class WorkerRunner {
   }
 
   #waitForNotification(): Promise<void> {
+    if (this.#wakePending) {
+      this.#wakePending = false;
+      return Promise.resolve();
+    }
     const { promise, resolve } = Promise.withResolvers<void>();
     const timer = setTimeout(() => {
       this.#wakeResolve = null;

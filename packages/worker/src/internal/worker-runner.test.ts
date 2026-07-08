@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  JobAckErrorEvent,
   JobCompletedEvent,
   JobErrorEvent,
   JobFailedEvent,
@@ -332,6 +333,54 @@ describe("WorkerRunner job events", () => {
     await captured(events);
     expect(events[0].phase).toBe("fail");
   });
+
+  it("emits onJobAckError when an acknowledgement returns unusable state", async () => {
+    // Arrange
+    const events: JobAckErrorEvent[] = [];
+    const runner = makeRunner({
+      completeResult: "missing",
+      events: { onJobAckError: (e) => events.push(e) },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert
+    await captured(events);
+    expect(events[0]).toMatchObject({ phase: "complete", error: "missing" });
+  });
+
+  it("reports malformed acknowledgement results through both error events", async () => {
+    // Arrange
+    const events: { source: "job" | "worker"; event: unknown }[] = [];
+    const runner = makeRunner({
+      completeResult: "invalid",
+      events: {
+        onJobAckError: (event) => events.push({ source: "job", event }),
+        onWorkerError: (event) => events.push({ source: "worker", event }),
+      },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert
+    await captured(events, 2);
+    expect(events).toMatchObject([
+      {
+        source: "worker",
+        event: {
+          kind: "ack",
+          jobId: "j1",
+          error: new Error("Unexpected complete result: invalid"),
+        },
+      },
+      {
+        source: "job",
+        event: { phase: "complete", error: new Error("Unexpected complete result: invalid") },
+      },
+    ]);
+  });
 });
 
 describe("WorkerRunner event handler failures", () => {
@@ -482,6 +531,26 @@ describe("WorkerRunner recovery sweep events", () => {
     // Assert
     await captured(events);
     expect(events[0]).toMatchObject({ cause: "stalled", job: { runs: 3 } });
+  });
+});
+
+describe("WorkerRunner wake handling", () => {
+  it("does not lose a wake that lands before the loop parks", async () => {
+    // Arrange: first claim misses, second has the job. pollInterval is 60s,
+    // so without the pending-wake flag the runner stalls past the timeout.
+    const events: JobCompletedEvent[] = [];
+    const runner = makeRunner({
+      claims: [null, jobHash()],
+      events: { onJobCompleted: (e) => events.push(e) },
+    });
+
+    // Act: wake before the claim loop has parked a waiter.
+    runner.start();
+    runner.wake();
+
+    // Assert
+    await captured(events);
+    expect(events[0].job).toMatchObject({ id: "j1", status: "completed" });
   });
 });
 
