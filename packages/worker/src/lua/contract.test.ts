@@ -29,7 +29,7 @@ const retention = { mode: "trim", ttl: 5000, count: 100 } as const;
 
 /** Representative non-key args for each script (shape only; values unused). */
 const ARGS = {
-  claimGlobal: { leaseMs: 1000, tag: "{q:t}" },
+  claimGlobalBatch: { leaseMs: 1000, tag: "{q:t}", count: 10 },
   complete: { jobId: "j", lockToken: "tok", tag: "{q:t}", retention },
   fail: { jobId: "j", error: "boom", lockToken: "tok", tag: "{q:t}", retention },
   recover: { batchSize: 10, reason: "stalled", tag: "{q:t}", retention },

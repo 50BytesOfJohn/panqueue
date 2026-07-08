@@ -44,6 +44,8 @@ function jobHash(overrides: Record<string, string> = {}): string[] {
 interface HarnessOptions {
   processor?: Processor;
   events: WorkerEventHandlers;
+  /** Concurrency for the runner. Default: 1. */
+  concurrency?: number;
   /** Result of the fail script. Default: "waiting". */
   failResult?: string;
   /** Result of the complete script. Default: "completed". */
@@ -52,6 +54,12 @@ interface HarnessOptions {
   claim?: string[] | null;
   /** Sequence of claim results consumed in order. Overrides `claim`. */
   claims?: (string[] | null)[];
+  /**
+   * A single raw batch array returned verbatim by the first `claimGlobalBatch`
+   * call (empty thereafter). Lets a test drive the real multi-element dispatch
+   * path — mixed corrupt/healthy entries in one reply. Overrides `claim`.
+   */
+  batch?: unknown[];
   /** Entries returned by the first recovery sweep; enables the sweep timer. */
   recover?: unknown[];
 }
@@ -73,13 +81,21 @@ function makeRunner(options: HarnessOptions): WorkerRunner {
   let recovered = false;
   const client: PanqueueWorkerClient = {
     disconnect: async () => {},
-    claimGlobal: async () => {
-      if (options.claims) {
-        return options.claims[claimIndex++] ?? null;
+    // Batch claim: wrap each scripted single-claim result into a batch array
+    // ([] when there's nothing to claim), mirroring the Lua script's shape.
+    claimGlobalBatch: async () => {
+      if (options.batch) {
+        if (claimed) return [];
+        claimed = true;
+        return options.batch;
       }
-      if (claimed || options.claim === null) return null;
+      if (options.claims) {
+        const next = options.claims[claimIndex++] ?? null;
+        return next === null ? [] : [next];
+      }
+      if (claimed || options.claim === null) return [];
       claimed = true;
-      return options.claim ?? jobHash();
+      return [options.claim ?? jobHash()];
     },
     complete: async () => options.completeResult ?? "completed",
     fail: async () => options.failResult ?? "waiting",
@@ -96,6 +112,7 @@ function makeRunner(options: HarnessOptions): WorkerRunner {
     "q",
     options.processor ?? (async () => {}),
     {
+      concurrency: options.concurrency ?? 1,
       pollInterval: 60_000,
       recoverIntervalMs: options.recover ? 5 : 0,
       events: options.events,
@@ -554,6 +571,37 @@ describe("WorkerRunner wake handling", () => {
   });
 });
 
+describe("WorkerRunner batch claim permit accounting", () => {
+  it("releases the unused tail when a batch comes back partial", async () => {
+    // Arrange — concurrency 4, but only one job is ever claimable. The loop
+    // holds 4 permits, dispatches 1, and must release the other 3 immediately.
+    const completed: JobCompletedEvent[] = [];
+    const runner = makeRunner({
+      concurrency: 4,
+      claim: jobHash(),
+      events: { onJobCompleted: (e) => completed.push(e) },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert — after the job settles, every permit is back (no leak).
+    await captured(completed);
+    await vi.waitFor(() => expect(runner.availablePermits).toBe(4));
+  });
+
+  it("releases every permit when a batch comes back empty", async () => {
+    // Arrange
+    const runner = makeRunner({ concurrency: 3, claim: null, events: {} });
+
+    // Act
+    runner.start();
+
+    // Assert — an empty batch parks the loop with all permits returned.
+    await vi.waitFor(() => expect(runner.availablePermits).toBe(3));
+  });
+});
+
 describe("WorkerRunner corrupt job handling", () => {
   it("emits onWorkerError(kind:corrupt) for a corrupt claim and continues without parking", async () => {
     // Arrange — corrupt entry first, then a healthy job. If the loop parked
@@ -582,6 +630,60 @@ describe("WorkerRunner corrupt job handling", () => {
     expect(started[0].job.id).toBe("j2");
     expect(processor).toHaveBeenCalledTimes(1);
     expect(processor).toHaveBeenCalledWith(expect.objectContaining({ id: "j2" }));
+  });
+
+  it("dispatches a multi-element batch with a mixed corrupt/healthy reply", async () => {
+    // Arrange — one claimGlobalBatch call returns three entries in a single
+    // array: a corrupt marker plus two healthy jobs. Exercises the
+    // `for (const jobData of jobs)` path for length > 1 (the harness's default
+    // one-element wrapping never does).
+    const errors: WorkerErrorEvent[] = [];
+    const completed: JobCompletedEvent[] = [];
+    const runner = makeRunner({
+      concurrency: 3,
+      batch: [["corrupt", "jX"], jobHash({ id: "j2" }), jobHash({ id: "j3" })],
+      events: {
+        onWorkerError: (e) => errors.push(e),
+        onJobCompleted: (e) => completed.push(e),
+      },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert — corrupt surfaces once; both healthy jobs complete; no permit leak.
+    await captured(completed, 2);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ kind: "corrupt", jobId: "jX" });
+    expect(completed.map((e) => e.job.id).toSorted()).toEqual(["j2", "j3"]);
+    await vi.waitFor(() => expect(runner.availablePermits).toBe(3));
+  });
+
+  it("degrades an undecodable batch entry to corrupt without poisoning healthy siblings", async () => {
+    // Arrange — the script already RPOP'd and marked every entry active, so a
+    // single entry that fails to decode (here an empty hash → deserializeJobHash
+    // throws) must not reject the whole claimBatch and abandon the healthy job.
+    const errors: WorkerErrorEvent[] = [];
+    const completed: JobCompletedEvent[] = [];
+    const runner = makeRunner({
+      concurrency: 2,
+      batch: [[], jobHash({ id: "j2" })],
+      events: {
+        onWorkerError: (e) => errors.push(e),
+        onJobCompleted: (e) => completed.push(e),
+      },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert — the bad entry costs one permit (surfaced as corrupt); the healthy
+    // job still completes and every permit returns.
+    await captured(completed);
+    expect(completed[0].job.id).toBe("j2");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ kind: "corrupt" });
+    await vi.waitFor(() => expect(runner.availablePermits).toBe(2));
   });
 
   it("emits onWorkerError(kind:corrupt) for a corrupt recovered job with no retry/failed", async () => {

@@ -57,6 +57,7 @@ export class WorkerRunner {
   readonly #lockRenewMs: number;
   readonly #recoverIntervalMs: number;
   readonly #recoverBatchSize: number;
+  readonly #claimBatchCap: number;
   readonly #events: WorkerEventHandlers;
 
   readonly #scheduler: BaseJobScheduler;
@@ -86,6 +87,8 @@ export class WorkerRunner {
     this.#lockRenewMs = options.lockRenewMs ?? Math.max(1, Math.floor(this.#leaseMs / 3));
     this.#recoverIntervalMs = options.recoverIntervalMs ?? 30_000;
     this.#recoverBatchSize = options.recoverBatchSize ?? 100;
+    // Clamp to [1, 64]: 64 is a hard ceiling regardless of user input.
+    this.#claimBatchCap = Math.min(64, Math.max(1, options.claimBatchCap ?? 16));
     this.#events = options.events ?? {};
 
     this.#scheduler = new GlobalJobScheduler(queueId, client, retention);
@@ -114,6 +117,11 @@ export class WorkerRunner {
   /** Number of jobs currently being processed. */
   get inFlightCount(): number {
     return this.#inFlight.size;
+  }
+
+  /** Free concurrency permits. Exposed for tests asserting no permit leak. */
+  get availablePermits(): number {
+    return this.#semaphore.available;
   }
 
   /** Begin consuming jobs. */
@@ -238,44 +246,63 @@ export class WorkerRunner {
         break;
       }
 
-      let jobData: ClaimResult;
+      // Greedily top up permits so a full batch can be claimed in one round
+      // trip. `n` = permits held; bounded by claimBatchCap and free permits,
+      // so the batch never exceeds capacity and cannot create idle-active jobs.
+      let n = 1;
+      const target = Math.min(this.#claimBatchCap, this.#semaphore.available + 1);
+      while (n < target && this.#semaphore.tryAcquire()) n++;
+
+      let jobs: Exclude<ClaimResult, null>[];
       try {
-        jobData = await this.#scheduler.claim(this.#leaseMs);
+        jobs = await this.#scheduler.claimBatch(this.#leaseMs, n);
       } catch (err) {
-        this.#semaphore.release();
+        this.#releasePermits(n);
         this.#emitWorkerError({ kind: "claim", error: err });
         await this.#waitForNotification();
         continue;
       }
 
-      if (jobData === null) {
-        this.#semaphore.release();
+      if (jobs.length === 0) {
+        this.#releasePermits(n);
         await this.#waitForNotification();
         continue;
       }
 
-      // Corrupt: pointer survived, hash gone. Already RPOP'd, so do not park
-      // — emit, release, and continue so healthy jobs aren't stalled behind it.
-      if ("corrupt" in jobData) {
-        this.#emitWorkerError({ kind: "corrupt", jobId: jobData.jobId });
-        this.#semaphore.release();
-        continue;
+      for (const jobData of jobs) {
+        // Corrupt: pointer survived, hash gone. Already RPOP'd, so emit,
+        // release its permit, and move on — healthy jobs aren't stalled.
+        if ("corrupt" in jobData) {
+          this.#emitWorkerError({ kind: "corrupt", jobId: jobData.jobId });
+          this.#semaphore.release();
+          continue;
+        }
+
+        const lockToken = jobData.lockToken ?? "";
+        const renewer = this.#leaseRenewer.start(jobData.id, lockToken);
+        const entry: InFlightEntry = {
+          promise: Promise.resolve(),
+          jobId: jobData.id,
+          lockToken,
+          stopRenewer: renewer.stop,
+        };
+        entry.promise = this.#processJob(jobData, renewer).finally(() => {
+          this.#inFlight.delete(entry);
+          this.#semaphore.release();
+        });
+        this.#inFlight.add(entry);
       }
 
-      const lockToken = jobData.lockToken ?? "";
-      const renewer = this.#leaseRenewer.start(jobData.id, lockToken);
-      const entry: InFlightEntry = {
-        promise: Promise.resolve(),
-        jobId: jobData.id,
-        lockToken,
-        stopRenewer: renewer.stop,
-      };
-      entry.promise = this.#processJob(jobData, renewer).finally(() => {
-        this.#inFlight.delete(entry);
-        this.#semaphore.release();
-      });
-      this.#inFlight.add(entry);
+      // Release permits for the tail of the batch that came back empty (queue
+      // drained mid-batch). Every held permit is now accounted for: dispatched
+      // jobs release on finally, corrupt/unused release here.
+      this.#releasePermits(n - jobs.length);
     }
+  }
+
+  /** Release `count` permits (no-op when count <= 0). */
+  #releasePermits(count: number): void {
+    for (let i = 0; i < count; i++) this.#semaphore.release();
   }
 
   async #processJob(jobData: JobData, renewer: LeaseRenewal): Promise<void> {
@@ -348,6 +375,9 @@ export class WorkerRunner {
     }
   }
 
+  // ponytail: per-job thunk kept as a deliberate seam. Claim is batched;
+  // ack (complete/fail) batching is intentionally not — wrap the thunk here
+  // if/when acks become the bottleneck.
   async #acknowledgeJob(
     job: JobData,
     phase: JobAckPhase,

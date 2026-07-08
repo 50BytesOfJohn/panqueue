@@ -219,6 +219,14 @@ export interface WorkerDefinitionOptions<T extends JsonSerializable = JsonSerial
   recoverIntervalMs?: number;
   /** Maximum jobs processed per recovery sweep. Default: 100. */
   recoverBatchSize?: number;
+  /**
+   * Maximum jobs claimed per Redis round trip. The claim loop batches up to
+   * this many free permits into a single Lua call, cutting per-job round trips.
+   * Never exceeds the number of free concurrency permits, so it cannot create
+   * active-but-idle jobs. Default: 16. Hard ceiling: 64 (values above are
+   * clamped).
+   */
+  claimBatchCap?: number;
   /** Event handlers for observability. */
   events?: WorkerEventHandlers<T>;
 }

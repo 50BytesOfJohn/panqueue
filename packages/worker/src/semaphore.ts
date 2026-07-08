@@ -66,6 +66,18 @@ export class Semaphore {
     });
   }
 
+  /**
+   * Try to acquire a permit without waiting. Returns `true` and takes a permit
+   * if one is free, `false` otherwise. Used to greedily top up a batch claim.
+   */
+  tryAcquire(): boolean {
+    if (this.#current < this.#max) {
+      this.#current++;
+      return true;
+    }
+    return false;
+  }
+
   /** Release a permit and wake the next waiter (FIFO). */
   release(): void {
     const next = this.#waiters.shift();

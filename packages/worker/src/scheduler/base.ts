@@ -75,8 +75,13 @@ export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializ
     this.retention = retention;
   }
 
-  /** Claim the next available job. Mode-specific implementation. */
-  abstract claim(leaseMs: number): Promise<ClaimResult<T>>;
+  /**
+   * Claim up to `count` available jobs in one round trip. Mode-specific
+   * implementation. Returns one entry per claimed job (never a `null`
+   * element — the return type excludes it so callers need no null guard);
+   * a shorter array than `count` means the queue drained.
+   */
+  abstract claimBatch(leaseMs: number, count: number): Promise<Exclude<ClaimResult<T>, null>[]>;
 
   /** Mark a job as completed; lockToken fences against stalled recovery. */
   async complete(jobId: string, lockToken: string): Promise<CompleteResult> {

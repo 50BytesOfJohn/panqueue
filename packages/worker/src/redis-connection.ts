@@ -2,7 +2,7 @@ import { createClient, type RedisClientOptions } from "redis";
 
 import { type ConnectionOptions, PanqueueError, type QueueKeys } from "@panqueue/core";
 
-import type { ClaimGlobalArgs } from "./lua/claim-global.js";
+import type { ClaimGlobalBatchArgs } from "./lua/claim-global-batch.js";
 import type { CompleteArgs } from "./lua/complete.js";
 import type { ExtendLockArgs } from "./lua/extend-lock.js";
 import type { FailArgs } from "./lua/fail.js";
@@ -26,7 +26,7 @@ export interface PanqueueSubscriber {
  */
 export interface PanqueueWorkerClient {
   disconnect(): Promise<void>;
-  claimGlobal(keys: QueueKeys, args: ClaimGlobalArgs): Promise<unknown>;
+  claimGlobalBatch(keys: QueueKeys, args: ClaimGlobalBatchArgs): Promise<unknown>;
   complete(keys: QueueKeys, args: CompleteArgs): Promise<unknown>;
   fail(keys: QueueKeys, args: FailArgs): Promise<unknown>;
   recover(keys: QueueKeys, args: RecoverArgs): Promise<unknown>;

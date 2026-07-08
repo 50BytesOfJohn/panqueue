@@ -1,6 +1,9 @@
 import type { RedisScripts } from "redis";
 
-import { CLAIM_GLOBAL_SCRIPT, type ClaimGlobalScript } from "./lua/claim-global.js";
+import {
+  CLAIM_GLOBAL_BATCH_SCRIPT,
+  type ClaimGlobalBatchScript,
+} from "./lua/claim-global-batch.js";
 import { COMPLETE_SCRIPT, type CompleteScript } from "./lua/complete.js";
 import { EXTEND_LOCK_SCRIPT, type ExtendLockScript } from "./lua/extend-lock.js";
 import { FAIL_SCRIPT, type FailScript } from "./lua/fail.js";
@@ -8,7 +11,7 @@ import { RECOVER_SCRIPT, type RecoverScript } from "./lua/recover.js";
 import { REQUEUE_ACTIVE_SCRIPT, type RequeueActiveScript } from "./lua/requeue-active.js";
 
 export interface WorkerScripts extends RedisScripts {
-  claimGlobal: ClaimGlobalScript;
+  claimGlobalBatch: ClaimGlobalBatchScript;
   complete: CompleteScript;
   fail: FailScript;
   recover: RecoverScript;
@@ -17,7 +20,7 @@ export interface WorkerScripts extends RedisScripts {
 }
 
 export const WORKER_SCRIPTS: WorkerScripts = {
-  claimGlobal: CLAIM_GLOBAL_SCRIPT,
+  claimGlobalBatch: CLAIM_GLOBAL_BATCH_SCRIPT,
   complete: COMPLETE_SCRIPT,
   extendLock: EXTEND_LOCK_SCRIPT,
   fail: FAIL_SCRIPT,
