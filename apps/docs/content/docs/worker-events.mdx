@@ -229,7 +229,7 @@ recovery reason rather than a value thrown by your code.
 | `onJobFailed`    | A job fails terminally — no retries remain.                        |
 | `onJobStale`     | An acknowledgement was fenced off (the job's lease was lost).      |
 | `onJobAckError`  | A complete/fail acknowledgement failed or returned unusable state. |
-| `onWorkerError`  | An internal worker error: claiming, lease renewal, recovery sweep. |
+| `onWorkerError`  | An internal worker error: claiming, lease renewal, recovery sweeps, corrupt jobs. |
 | `onStateChange`  | The worker transitions between lifecycle states.                   |
 
 ### onJobStarted
@@ -338,10 +338,11 @@ onWorkerError?(event: {
     | "recovery-sweep"
     | "ack"
     | "requeue"
-    | "event-handler";
+    | "event-handler"
+    | "corrupt";
   jobId?: string;
   handlerName?: string;
-  error: unknown;
+  error?: unknown;
 }): void;
 ```
 
@@ -349,13 +350,45 @@ Fires on internal worker errors that are not tied to a single job outcome:
 claim failures, lease-renewal failures, recovery-sweep failures, and failures
 thrown by other event handlers. `kind` names the operation that failed;
 `jobId` is set when the failure is job-scoped (lease renewals,
-acknowledgements, shutdown requeues), and `handlerName` names the throwing
-handler for kind `"event-handler"`. Failures thrown by `onWorkerError` itself
-are dropped.
+acknowledgements, shutdown requeues, corrupt jobs), and `handlerName` names
+the throwing handler for kind `"event-handler"`. `error` carries the thrown
+value for kinds that wrap a caught error; it is absent for kind `"corrupt"`,
+which surfaces a condition rather than a thrown value. Failures thrown by
+`onWorkerError` itself are dropped.
 
 Connection-level problems (the socket dropping, reconnect attempts) surface
 on the pool's `events` instead — see
 [Pool connection events](#pool-connection-events).
+
+### Corrupt jobs
+
+A corrupt job is one whose pointer survived in the `waiting` list or `active`
+set but whose job hash is gone — there is no payload to run, no counters to
+increment, and no status to transition. The job is unrecoverable.
+
+Panqueue surfaces a corrupt job exactly once via `onWorkerError` with
+`kind: "corrupt"` and the orphaned `jobId`, then removes the pointer. It does
+not synthesize an `onJobFailed` (any `JobData` would be fiction that crashes
+handlers) or move the entry to a dead-letter store. The claim loop does not
+park after a corrupt entry, so healthy jobs behind it are not stalled for a
+poll interval.
+
+Durable capture is your concern: persist the `jobId` yourself if you need a
+record, because Panqueue holds onto nothing. Observability storage is out of
+core by design.
+
+```ts title="workers/email.ts"
+const worker = defineWorker(pq, "email", processEmail, {
+  events: {
+    onWorkerError({ kind, jobId }) {
+      if (kind === "corrupt") {
+        // The job hash is gone — persist the orphaned id for investigation.
+        log.error({ jobId }, "corrupt job: pointer survived, hash gone");
+      }
+    },
+  },
+});
+```
 
 ### onStateChange
 
