@@ -92,9 +92,10 @@ async function openRawClient(options: ConnectionOptions, hooks: ConnectionLifecy
   const base = buildClientOptions(options);
   const client = createClient({
     ...base,
-    // RESP2 is required: Lua scripts return HGETALL as flat arrays, and RESP3
-    // would decode them as Maps (breaking Array.isArray checks in schedulers).
-    RESP: 2,
+    // RESP3 (redis v6 default). Safe for our schedulers: HGETALL is only ever
+    // called inside Lua, and the Lua→reply conversion yields a flat array under
+    // both protocols (no `redis.setresp(3)`), so deserializeJobHash is unaffected.
+    RESP: 3,
     scripts: WORKER_SCRIPTS,
     socket: {
       ...base.socket,
