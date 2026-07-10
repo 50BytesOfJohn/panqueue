@@ -42,6 +42,7 @@ describe("queueKeys", () => {
       failed: "{q:emails}:failed",
       delayed: "{q:emails}:delayed",
       notify: "{q:emails}:notify",
+      concurrency: "{q:emails}:concurrency",
     });
   });
 });

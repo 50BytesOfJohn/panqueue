@@ -64,6 +64,12 @@ export function notifyKey(queueId: string): QueueKey<"notify"> {
   return queueKey(queueId, "notify") as QueueKey<"notify">;
 }
 
+/** Per-queue concurrency meta hash — versioned global limit written at worker
+ *  boot under the declare-and-verify fencing rule. Fields: `limit`, `version`. */
+export function concurrencyKey(queueId: string): QueueKey<"concurrency"> {
+  return queueKey(queueId, "concurrency") as QueueKey<"concurrency">;
+}
+
 /**
  * The full set of Redis keys for a single queue, all sharing one hash slot.
  *
@@ -78,6 +84,7 @@ export interface QueueKeys {
   readonly failed: QueueKey<"failed">;
   readonly delayed: QueueKey<"delayed">;
   readonly notify: QueueKey<"notify">;
+  readonly concurrency: QueueKey<"concurrency">;
 }
 
 /** Build the full {@link QueueKeys} bundle for a queue. */
@@ -89,5 +96,6 @@ export function queueKeys(queueId: string): QueueKeys {
     failed: failedKey(queueId),
     delayed: delayedKey(queueId),
     notify: notifyKey(queueId),
+    concurrency: concurrencyKey(queueId),
   };
 }

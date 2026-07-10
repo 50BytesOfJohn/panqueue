@@ -12,6 +12,7 @@ export type { QueueKey, QueueKeys } from "./src/keys.js";
 export {
   activeKey,
   completedKey,
+  concurrencyKey,
   delayedKey,
   failedKey,
   jobKey,
