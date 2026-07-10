@@ -207,6 +207,25 @@ Worker definitions do not carry Redis connection configuration. This keeps
 connection reuse simple: one pool creates the worker Redis instances once and
 shares them across every registered queue.
 
+#### Concurrency option shape
+
+The `concurrency` option is a union:
+
+```ts
+type WorkerConcurrency = number | { local?: number; global?: { limit: number; version: number } };
+```
+
+- A plain `number` limits **this process only** (local concurrency, default 1).
+  `{ concurrency: 10 }` and `{ concurrency: { local: 10 } }` are equivalent.
+- The object form adds an optional `global` cross-process limit declared as
+  `{ limit, version }`. `local` still defaults to 1 when omitted.
+
+`local`, `global.limit`, and `global.version` must be integers `>= 1`; the
+`WorkerPool` constructor rejects anything else with a `PanqueueError`
+(synchronous, before any connection).
+
+See "Global Concurrency Limit" below for the cross-process semantics.
+
 ### Queue boundary
 
 One worker handles one queue. `queueId` should represent a workload class (to
@@ -551,6 +570,66 @@ If a claim attempt finds no job:
 
 Pub/sub is fire-and-forget, so the polling fallback preserves liveness during
 reconnects or transient network issues.
+
+### Global Concurrency Limit (Cross-Process)
+
+The semaphore above bounds concurrency **within a single process**. A worker may
+additionally declare a **global** limit that bounds concurrently active jobs
+across every process sharing a queue, via
+`concurrency: { global: { limit, version } }`.
+
+#### Declaration and fencing
+
+The limit is stored in a Redis hash at `{q:<queueId>}:concurrency` with fields
+`limit` and `version`. **An absent key means unlimited** — queues that never
+declare a global limit behave exactly as before.
+
+At `WorkerPool.start()`, each definition that declares `concurrency.global` runs
+one atomic Lua script implementing a versioned declare-and-verify rule:
+
+1. Key absent → write `{limit, version}`.
+2. Incoming `version` higher than stored → overwrite.
+3. Incoming `version` lower than stored → no-op (an older deploy defers to the
+   newer one).
+4. Same `version`, same `limit` → no-op (idempotent restart).
+5. Same `version`, different `limit` → **fatal**: `start()` rejects with
+   `ConcurrencyLimitConflictError`. Change a limit by bumping its `version`.
+
+Because declaration is versioned and atomic, processes may boot in any order:
+the highest version wins and a genuine disagreement fails loudly rather than
+letting the last writer silently win.
+
+#### Enforcement
+
+The claim script **always** reads `{q:<queueId>}:concurrency` (a single `HGET`;
+absent → no clamp), so enforcement follows the stored Redis key, not local
+config. A worker process that did not declare the option still respects a limit
+declared by its peers — one un-upgraded process cannot exceed the limit.
+
+When a limit is present the claim script computes free capacity once,
+`free = limit - ZCARD(active)` (the script is atomic, so `ZCARD` cannot change
+mid-invocation), clamps the batch size to `free`, and returns an empty batch
+when `free < 1`.
+
+Enforcement counts the shared `active` ZSET, which includes jobs leased by any
+process — including a crashed worker's jobs that are stalled but not yet
+recovered. Those jobs hold capacity until the recovery sweep reclaims them
+(bounded by `leaseMs` + the recovery sweep interval). This is the intended
+at-least-once tradeoff. Corrupt entries never enter `active`, so they consume no
+global capacity.
+
+#### Saturation wakeup latency (known caveat)
+
+The `complete` script does not `PUBLISH` to `notify` (only a retry-requeue in
+`fail` does). So when the global limit is saturated and enqueue traffic pauses, a
+worker parked on the limit is only re-woken by a new enqueue or its fallback poll
+interval (default 5s). Capacity freed purely by completions is therefore picked
+up with up to one poll interval of latency — the same latency class as the
+documented lost-wakeup behavior. A conditional `PUBLISH` from `complete` when the
+concurrency key exists is a deliberate future optimization, out of scope here.
+
+Removing a limit is a manual operation: `DEL {q:<queueId>}:concurrency`, or bump
+the version with a very large limit.
 
 ### Shutdown Semantics
 

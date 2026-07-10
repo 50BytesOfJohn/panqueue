@@ -3,6 +3,66 @@
 This file records rationale and dated decisions. It is not the source of truth
 for behavior; `SPEC.md` is authoritative.
 
+## 2026-07-08: Global Concurrency Limit (Versioned Declare-and-Verify)
+
+### Decision
+
+- A per-queue cross-process concurrency limit is declared on worker options as
+  `concurrency.global: { limit, version }`. The `concurrency` field is a union:
+  a plain `number` keeps its existing meaning (this process only — local
+  concurrency, default 1), and the object form `{ local?, global? }` adds the
+  optional cross-process limit. `local` defaults to 1.
+- The limit is stored in Redis as a hash at `{q:<queueId>}:concurrency` with
+  string fields `limit` and `version`. **Absent key = unlimited** — existing
+  users need no migration and get bit-identical claim behavior.
+- At boot, each definition that declares `concurrency.global` runs a single
+  atomic Lua script (`declare-concurrency-limit`) implementing a versioned
+  declare-and-verify fencing rule:
+  1. Key absent → write, `written`.
+  2. Incoming version higher → overwrite, `written`.
+  3. Incoming version lower → no-op, `ignored`.
+  4. Same version, same limit → no-op, `unchanged` (idempotent restart — an
+     unchanged redeploy must never crash-loop).
+  5. Same version, different limit → no write, `conflict`.
+- A `conflict` is an operator error (two live deploys disagree). It is fatal:
+  `WorkerPool.start()` rejects with `ConcurrencyLimitConflictError`. Fix by
+  bumping `concurrency.global.version` alongside the new limit, or reverting.
+- The claim script **always** consults `{q:<id>}:concurrency` (one `HGET`;
+  absent → unlimited, no clamp). Enforcement follows the stored Redis key, not
+  local config, so a worker process without the option still respects a limit
+  declared by its peers — one stale deploy cannot bust the limit.
+- Enforcement counts the shared `active` ZSET: `free = limit - ZCARD(active)`,
+  computed once (Lua is atomic, ZCARD cannot change mid-script). A crashed
+  worker's jobs hold capacity until the recovery sweep reclaims them (bounded by
+  `leaseMs` + sweep interval) — the intended at-least-once tradeoff.
+- No master election, no runtime API, no config-service. A runtime mutation API
+  is a non-breaking escape hatch that can be added later; it is deferred.
+- Removing a limit later is manual (`DEL {q:<id>}:concurrency`, or bump the
+  version with a very large limit); no code path for it.
+- Internal identifiers avoid a bare `Global*` prefix because `GlobalJobScheduler`
+  already means the non-keyed scheduling mode. Names used: `QueueConcurrencyLimit`,
+  `concurrencyKey`, `declareConcurrencyLimit`, `ConcurrencyLimitConflictError`.
+  Only the public option field is `global`.
+
+### Why
+
+- The `2026-05-14: Concurrency Scope Naming` entry established the worker as a
+  source of truth that writes concurrency metadata into Redis; this feature is
+  the concrete cross-process enforcement that builds on that idea, storing the
+  limit under the queue's own hash tag so `waiting`/`active`/`concurrency` share
+  a single Cluster slot.
+- Where `scope` was pure config with no server-side shared state (and so earned
+  no Lua), a global limit genuinely requires shared server-side state and atomic
+  read-modify-decision: only the Redis server can see every process's `active`
+  count at once, so the clamp has to run inside the atomic claim script.
+- Versioning makes limit changes deliberate and reviewable, and lets many
+  processes boot in any order without racing: the highest version wins, older
+  ones no-op, and a genuine disagreement (same version, different limit) fails
+  loudly instead of silently letting the last writer win.
+- Idempotent same-version/same-limit avoids crash-looping an unchanged redeploy;
+  making enforcement follow the stored key (not local config) prevents a single
+  un-upgraded process from exceeding a limit its peers declared.
+
 ## 2026-07-01: Corrupt Job Pointers — Surface Once, Out of Core
 
 ### Decision
