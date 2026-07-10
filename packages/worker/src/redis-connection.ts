@@ -4,6 +4,7 @@ import { type ConnectionOptions, PanqueueError, type QueueKeys } from "@panqueue
 
 import type { ClaimGlobalBatchArgs } from "./lua/claim-global-batch.js";
 import type { CompleteArgs } from "./lua/complete.js";
+import type { DeclareConcurrencyLimitArgs } from "./lua/declare-concurrency-limit.js";
 import type { ExtendLockArgs } from "./lua/extend-lock.js";
 import type { FailArgs } from "./lua/fail.js";
 import type { RecoverArgs } from "./lua/recover.js";
@@ -28,6 +29,7 @@ export interface PanqueueWorkerClient {
   disconnect(): Promise<void>;
   claimGlobalBatch(keys: QueueKeys, args: ClaimGlobalBatchArgs): Promise<unknown>;
   complete(keys: QueueKeys, args: CompleteArgs): Promise<unknown>;
+  declareConcurrencyLimit(keys: QueueKeys, args: DeclareConcurrencyLimitArgs): Promise<unknown>;
   fail(keys: QueueKeys, args: FailArgs): Promise<unknown>;
   recover(keys: QueueKeys, args: RecoverArgs): Promise<unknown>;
   extendLock(keys: QueueKeys, args: ExtendLockArgs): Promise<unknown>;

@@ -9,8 +9,9 @@ import {
   resolveRetention,
 } from "@panqueue/core";
 
-import { isWorkerDefinition, type WorkerDefinition } from "./define-worker.js";
+import { isWorkerDefinition, resolveConcurrency, type WorkerDefinition } from "./define-worker.js";
 import { WorkerConnectionError } from "./errors.js";
+import { declareConcurrencyLimit } from "./internal/concurrency-fence.js";
 import { WorkerRunner } from "./internal/worker-runner.js";
 import {
   type ConnectionLifecycleHooks,
@@ -162,6 +163,25 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
         throw new PanqueueError(`Duplicate worker definition for queue "${def.queueId}"`);
       }
       seen.add(def.queueId);
+
+      const { local, global } = resolveConcurrency(def.options.concurrency);
+      if (!Number.isInteger(local) || local < 1) {
+        throw new PanqueueError(
+          `Worker for queue "${def.queueId}": concurrency must be an integer >= 1`,
+        );
+      }
+      if (global !== undefined) {
+        if (!Number.isInteger(global.limit) || global.limit < 1) {
+          throw new PanqueueError(
+            `Worker for queue "${def.queueId}": concurrency.global.limit must be an integer >= 1`,
+          );
+        }
+        if (!Number.isInteger(global.version) || global.version < 1) {
+          throw new PanqueueError(
+            `Worker for queue "${def.queueId}": concurrency.global.version must be an integer >= 1`,
+          );
+        }
+      }
     }
 
     this.#connectionOptions = options.connection ?? config.redis;
@@ -199,6 +219,14 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
     try {
       await redis.connect();
       subscriber = await redis.duplicate(this.#subscriberHooks());
+
+      // Fence each declared global concurrency limit before any runner can claim.
+      // A same-version/different-limit conflict is an operator error: abort the
+      // boot via the shared catch below (teardown + rethrow).
+      for (const def of this.#definitions) {
+        const { global } = resolveConcurrency(def.options.concurrency);
+        if (global) await declareConcurrencyLimit(redis.client, def.queueId, global);
+      }
 
       const runners = this.#definitions.map((def) => {
         const rule = this.#queueConfigs[def.queueId]?.retention;

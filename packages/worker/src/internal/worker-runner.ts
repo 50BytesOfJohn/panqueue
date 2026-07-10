@@ -1,12 +1,13 @@
 import type { JobData, JobStatus } from "@panqueue/core";
 
-import type {
-  JobAckPhase,
-  Processor,
-  WorkerDefinitionOptions,
-  WorkerErrorEvent,
-  WorkerEventHandlers,
-  WorkerState,
+import {
+  resolveConcurrency,
+  type JobAckPhase,
+  type Processor,
+  type WorkerDefinitionOptions,
+  type WorkerErrorEvent,
+  type WorkerEventHandlers,
+  type WorkerState,
 } from "../define-worker.js";
 import type { PanqueueWorkerClient } from "../redis-connection.js";
 import type {
@@ -81,7 +82,7 @@ export class WorkerRunner {
   ) {
     this.queueId = queueId;
     this.#processor = processor;
-    this.#concurrency = options.concurrency ?? 1;
+    this.#concurrency = resolveConcurrency(options.concurrency).local;
     this.#pollInterval = options.pollInterval ?? 5000;
     this.#leaseMs = options.leaseMs ?? 30_000;
     this.#lockRenewMs = options.lockRenewMs ?? Math.max(1, Math.floor(this.#leaseMs / 3));

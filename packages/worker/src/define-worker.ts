@@ -192,10 +192,40 @@ export interface WorkerEventHandlers<T extends JsonSerializable = JsonSerializab
   onStateChange?(event: StateChangeEvent): void;
 }
 
+/**
+ * Versioned global (cross-process) concurrency limit for a queue. Declared
+ * at worker boot and stored in Redis; the claim script enforces it across
+ * every worker process sharing the queue. Change `limit` by bumping
+ * `version` — a deliberate, reviewable deploy action.
+ */
+export interface QueueConcurrencyLimit {
+  /** Maximum concurrently active jobs across ALL worker processes. Integer >= 1. */
+  limit: number;
+  /** Monotonic declaration version, bumped by a human to change `limit`. Integer >= 1. */
+  version: number;
+}
+
+/** Concurrency option: a plain number is shorthand for `{ local: n }`. */
+export type WorkerConcurrency = number | { local?: number; global?: QueueConcurrencyLimit };
+
+/** Normalize the concurrency union. Plain number = local-only. */
+export function resolveConcurrency(concurrency: WorkerConcurrency | undefined): {
+  local: number;
+  global?: QueueConcurrencyLimit;
+} {
+  if (concurrency === undefined) return { local: 1 };
+  if (typeof concurrency === "number") return { local: concurrency };
+  return { local: concurrency.local ?? 1, global: concurrency.global };
+}
+
 /** Options accepted by a worker definition. Connection lives on the pool. */
 export interface WorkerDefinitionOptions<T extends JsonSerializable = JsonSerializable> {
-  /** Maximum number of concurrent jobs for this queue. Default: 1. */
-  concurrency?: number;
+  /**
+   * Maximum number of concurrent jobs for this queue. A plain number limits
+   * this process only (default: 1). The object form adds an optional
+   * cross-process limit: `{ local: 4, global: { limit: 10, version: 1 } }`.
+   */
+  concurrency?: WorkerConcurrency;
   /** Fallback polling interval in ms. Default: 5000. */
   pollInterval?: number;
   /**

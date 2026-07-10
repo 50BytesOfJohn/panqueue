@@ -24,6 +24,16 @@ export type ClaimGlobalBatchScript = PanqueueRedisScript<ClaimGlobalBatchScriptA
  * `now`/`deadline` are shared across the whole batch — lockToken uniqueness
  * still holds because `runs` (from HINCRBY) differs per job.
  *
+ * 0. Read the stored global limit from the concurrency hash; when present,
+ *    clamp `count` to `limit - ZCARD(active)` and return an empty batch when no
+ *    capacity is free. Absent key = unlimited (today's behavior). Because the
+ *    script is atomic, ZCARD cannot change mid-invocation, so the free-capacity
+ *    figure is computed once up front. `active` counts jobs leased by ANY
+ *    process (including stalled-not-yet-recovered ones), so a crashed worker's
+ *    jobs hold capacity until the recovery sweep reclaims them — the intended
+ *    at-least-once tradeoff. Corrupt entries never ZADD into `active`, so they
+ *    do not consume global capacity.
+ *
  * For each job, up to `count` times:
  * 1. RPOP a job ID from the waiting list; stop early if it is empty
  *    (a partial batch is normal, not an error).
@@ -38,9 +48,22 @@ export type ClaimGlobalBatchScript = PanqueueRedisScript<ClaimGlobalBatchScriptA
  * Lua never decodes it.
  */
 export const CLAIM_GLOBAL_BATCH_SCRIPT: ClaimGlobalBatchScript = defineScript({
-  NUMBER_OF_KEYS: 2,
+  NUMBER_OF_KEYS: 3,
   SCRIPT: `
 local count = tonumber(ARGV[3])
+-- Global (cross-process) limit: stored by declare-concurrency-limit under
+-- the versioned fencing rule. Absent key = unlimited (today's behavior).
+-- Computed once: the script is atomic, ZCARD cannot change mid-invocation.
+local limit = tonumber(redis.call('HGET', KEYS[3], 'limit'))
+if limit then
+  local free = limit - redis.call('ZCARD', KEYS[2])
+  if free < 1 then
+    return {}
+  end
+  if free < count then
+    count = free
+  end
+end
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local deadline = now + tonumber(ARGV[1])
@@ -73,14 +96,14 @@ end
 return claimed
 `,
   /**
-   * KEYS[1..2] = waiting, active; ARGV[1..3] = leaseMs, tag, count.
+   * KEYS[1..3] = waiting, active, concurrency; ARGV[1..3] = leaseMs, tag, count.
    *
    * @param parser - command parser (injected by node-redis)
    * @param keys   - the queue's key bundle
    * @param args   - {@link ClaimGlobalBatchArgs}
    */
   parseCommand(parser: CommandParser, keys: QueueKeys, args: ClaimGlobalBatchArgs): void {
-    parser.pushKeys([keys.waiting, keys.active]);
+    parser.pushKeys([keys.waiting, keys.active, keys.concurrency]);
     parser.push(args.leaseMs.toString(), args.tag, args.count.toString());
   },
   transformReply(reply: unknown): unknown {

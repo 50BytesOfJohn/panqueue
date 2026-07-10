@@ -36,6 +36,10 @@ export type RecoverScript = PanqueueRedisScript<RecoverScriptArguments>;
  *        clear lockToken/leaseDeadline, mark status="waiting".
  *      - else: apply the failed-retention policy — delete the hash, or keep
  *        it in the failed ZSET trimmed by ttl/count bounds.
+ *    - Terminal-fail and corrupt entries remove an active entry without a
+ *      requeue, freeing a global permit; when a valid global limit is set and
+ *      jobs are waiting, PUBLISH notify so blocked claimers wake
+ *      (see complete.ts). The requeue branch already publishes.
  * 3. Returns one entry per recovered job: the outcome ("waiting", "failed",
  *    or "corrupt") followed by the job hash as HGETALL field/value pairs
  *    (for "waiting"/"failed") or just the jobId (for "corrupt", when the
@@ -47,13 +51,16 @@ export type RecoverScript = PanqueueRedisScript<RecoverScriptArguments>;
  * the others see no candidate left.
  */
 export const RECOVER_SCRIPT: RecoverScript = defineScript({
-  NUMBER_OF_KEYS: 4,
+  NUMBER_OF_KEYS: 5,
   SCRIPT: `
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local batch = tonumber(ARGV[1])
 local reason = ARGV[2]
 local tag = ARGV[3]
+-- tonumber mirrors the claim script's predicate: malformed limit = unlimited.
+-- Read once; the script is atomic, so the limit cannot change mid-sweep.
+local limited = tonumber(redis.call('HGET', KEYS[5], 'limit')) ~= nil
 
 local candidates = redis.call('ZRANGEBYSCORE', KEYS[1], 0, now, 'LIMIT', 0, batch)
 local recovered = {}
@@ -92,10 +99,16 @@ ${retentionLua({
   ttlArg: "ARGV[5]",
   countArg: "ARGV[6]",
 })}
+          if limited and redis.call('LLEN', KEYS[2]) > 0 then
+            redis.call('PUBLISH', KEYS[3], jobId)
+          end
         end
         table.insert(recovered, entry)
       else
         table.insert(recovered, {'corrupt', jobId})
+        if limited and redis.call('LLEN', KEYS[2]) > 0 then
+          redis.call('PUBLISH', KEYS[3], jobId)
+        end
       end
     end
   end
@@ -104,7 +117,7 @@ end
 return recovered
 `,
   /**
-   * KEYS[1..4] = active, waiting, notify, failed;
+   * KEYS[1..5] = active, waiting, notify, failed, concurrency;
    * ARGV[1..6] = batchSize, reason, tag, retention mode, ttl, count.
    *
    * @param parser - command parser (injected by node-redis)
@@ -112,7 +125,7 @@ return recovered
    * @param args   - {@link RecoverArgs}
    */
   parseCommand(parser: CommandParser, keys: QueueKeys, args: RecoverArgs): void {
-    parser.pushKeys([keys.active, keys.waiting, keys.notify, keys.failed]);
+    parser.pushKeys([keys.active, keys.waiting, keys.notify, keys.failed, keys.concurrency]);
     parser.push(
       args.batchSize.toString(),
       args.reason,

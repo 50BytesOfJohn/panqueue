@@ -30,12 +30,14 @@ export type FailScript = PanqueueRedisScript<FailScriptArguments>;
  * 3. HINCRBY failures and record handler failure metadata.
  * 4. If failures <= maxRetries: re-queue (LPUSH to waiting, PUBLISH notify)
  * 5. Else: apply the failed-retention policy — delete the hash, or keep it in
- *    the failed ZSET trimmed by ttl/count bounds.
+ *    the failed ZSET trimmed by ttl/count bounds; then, if a valid global
+ *    limit is set and jobs are waiting, PUBLISH notify — the terminal failure
+ *    freed a cross-process permit without a requeue (see complete.ts).
  *
  * Returns "waiting" (retried), "failed" (exhausted), "stale", or "missing".
  */
 export const FAIL_SCRIPT: FailScript = defineScript({
-  NUMBER_OF_KEYS: 4,
+  NUMBER_OF_KEYS: 5,
   SCRIPT: `
 local tag = ARGV[4]
 local jobKey = tag .. ':job:' .. ARGV[1]
@@ -76,11 +78,15 @@ ${retentionLua({
   ttlArg: "ARGV[6]",
   countArg: "ARGV[7]",
 })}
+  -- Freed a global permit without a requeue: see complete.ts for the predicate.
+  if tonumber(redis.call('HGET', KEYS[5], 'limit')) and redis.call('LLEN', KEYS[3]) > 0 then
+    redis.call('PUBLISH', KEYS[4], ARGV[1])
+  end
   return 'failed'
 end
 `,
   /**
-   * KEYS[1..4] = active, failed, waiting, notify;
+   * KEYS[1..5] = active, failed, waiting, notify, concurrency;
    * ARGV[1..7] = jobId, error, lockToken, tag, retention mode, ttl, count.
    *
    * @param parser - command parser (injected by node-redis)
@@ -88,7 +94,7 @@ end
    * @param args   - {@link FailArgs}
    */
   parseCommand(parser: CommandParser, keys: QueueKeys, args: FailArgs): void {
-    parser.pushKeys([keys.active, keys.failed, keys.waiting, keys.notify]);
+    parser.pushKeys([keys.active, keys.failed, keys.waiting, keys.notify, keys.concurrency]);
     parser.push(
       args.jobId,
       args.error,

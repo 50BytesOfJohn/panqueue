@@ -11,7 +11,9 @@ export type {
   JobStartedEvent,
   JobTiming,
   Processor,
+  QueueConcurrencyLimit,
   StateChangeEvent,
+  WorkerConcurrency,
   WorkerDefinition,
   WorkerDefinitionOptions,
   WorkerErrorEvent,
@@ -32,7 +34,7 @@ export type {
   WorkerPoolOptions,
 } from "./src/worker-pool.js";
 
-export { WorkerConnectionError } from "./src/errors.js";
+export { ConcurrencyLimitConflictError, WorkerConnectionError } from "./src/errors.js";
 
 export type { PanqueueConfig, QueueConfig } from "@panqueue/config";
 

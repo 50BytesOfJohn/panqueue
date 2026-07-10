@@ -106,6 +106,7 @@ function makeRunner(options: HarnessOptions): WorkerRunner {
     },
     extendLock: async () => "extended",
     requeueActive: async () => "waiting",
+    declareConcurrencyLimit: async () => ["written", 1],
   };
 
   const runner = new WorkerRunner(
@@ -599,6 +600,58 @@ describe("WorkerRunner batch claim permit accounting", () => {
 
     // Assert — an empty batch parks the loop with all permits returned.
     await vi.waitFor(() => expect(runner.availablePermits).toBe(3));
+  });
+});
+
+describe("WorkerRunner global-limit claim batches", () => {
+  it("releases permits for the clamped tail of a batch", async () => {
+    // Arrange — concurrency 4 but the global limit clamped the claim to 2 jobs
+    // (as when limit - ZCARD(active) == 2). Processors block on a deferred so
+    // the two claimed jobs stay in flight while we inspect the counts.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started: JobStartedEvent[] = [];
+    const runner = makeRunner({
+      concurrency: 4,
+      batch: [jobHash({ id: "j1" }), jobHash({ id: "j2" })],
+      processor: async () => {
+        await gate;
+      },
+      events: { onJobStarted: (e) => started.push(e) },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert — exactly the clamped 2 are in flight; the other 2 permits freed.
+    await vi.waitFor(() => expect(runner.inFlightCount).toBe(2));
+    release();
+    await vi.waitFor(() => expect(runner.availablePermits).toBe(4));
+  });
+
+  it("parks when the limit is exhausted (empty batch) and resumes on wake", async () => {
+    // Arrange — the first claim returns [] (global limit saturated on another
+    // process → nothing to hand out), then a job once capacity frees. To the
+    // runner an empty limit-clamped batch is indistinguishable from an empty
+    // queue: it parks and only resumes on a notify/poll wakeup.
+    const started: JobStartedEvent[] = [];
+    const runner = makeRunner({
+      concurrency: 2,
+      claims: [null, jobHash()],
+      events: { onJobStarted: (e) => started.push(e) },
+    });
+
+    // Act
+    runner.start();
+
+    // Assert — parked: no job starts until woken.
+    await vi.waitFor(() => expect(runner.availablePermits).toBe(2));
+    expect(started).toHaveLength(0);
+    runner.wake();
+    await captured(started);
+    expect(started).toHaveLength(1);
   });
 });
 

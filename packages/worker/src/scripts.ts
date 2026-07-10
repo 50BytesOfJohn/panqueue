@@ -5,6 +5,10 @@ import {
   type ClaimGlobalBatchScript,
 } from "./lua/claim-global-batch.js";
 import { COMPLETE_SCRIPT, type CompleteScript } from "./lua/complete.js";
+import {
+  DECLARE_CONCURRENCY_LIMIT_SCRIPT,
+  type DeclareConcurrencyLimitScript,
+} from "./lua/declare-concurrency-limit.js";
 import { EXTEND_LOCK_SCRIPT, type ExtendLockScript } from "./lua/extend-lock.js";
 import { FAIL_SCRIPT, type FailScript } from "./lua/fail.js";
 import { RECOVER_SCRIPT, type RecoverScript } from "./lua/recover.js";
@@ -13,6 +17,7 @@ import { REQUEUE_ACTIVE_SCRIPT, type RequeueActiveScript } from "./lua/requeue-a
 export interface WorkerScripts extends RedisScripts {
   claimGlobalBatch: ClaimGlobalBatchScript;
   complete: CompleteScript;
+  declareConcurrencyLimit: DeclareConcurrencyLimitScript;
   fail: FailScript;
   recover: RecoverScript;
   extendLock: ExtendLockScript;
@@ -22,6 +27,7 @@ export interface WorkerScripts extends RedisScripts {
 export const WORKER_SCRIPTS: WorkerScripts = {
   claimGlobalBatch: CLAIM_GLOBAL_BATCH_SCRIPT,
   complete: COMPLETE_SCRIPT,
+  declareConcurrencyLimit: DECLARE_CONCURRENCY_LIMIT_SCRIPT,
   extendLock: EXTEND_LOCK_SCRIPT,
   fail: FAIL_SCRIPT,
   recover: RECOVER_SCRIPT,

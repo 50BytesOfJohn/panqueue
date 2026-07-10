@@ -31,6 +31,7 @@ const retention = { mode: "trim", ttl: 5000, count: 100 } as const;
 const ARGS = {
   claimGlobalBatch: { leaseMs: 1000, tag: "{q:t}", count: 10 },
   complete: { jobId: "j", lockToken: "tok", tag: "{q:t}", retention },
+  declareConcurrencyLimit: { limit: 5, version: 1 },
   fail: { jobId: "j", error: "boom", lockToken: "tok", tag: "{q:t}", retention },
   recover: { batchSize: 10, reason: "stalled", tag: "{q:t}", retention },
   extendLock: { jobId: "j", lockToken: "tok", leaseMs: 1000, tag: "{q:t}" },
@@ -77,4 +78,15 @@ describe("worker script KEYS contract", () => {
       expect(pushed.slice(-3)).toEqual(["trim", "5000", "100"]);
     });
   }
+
+  it("declareConcurrencyLimit: pushes limit and version as string ARGV", () => {
+    // Arrange
+    const { parser, args: pushed } = recordingParser();
+
+    // Act
+    WORKER_SCRIPTS.declareConcurrencyLimit.parseCommand(parser, keys, ARGS.declareConcurrencyLimit);
+
+    // Assert — ARGV[1..2] = limit, version, stringified.
+    expect(pushed).toEqual(["5", "1"]);
+  });
 });
