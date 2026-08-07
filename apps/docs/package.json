@@ -16,7 +16,7 @@
     "@openrouter/ai-sdk-provider": "^2.9.1",
     "@radix-ui/react-presence": "^1.1.6",
     "@takumi-rs/image-response": "^1.8.3",
-    "ai": "^6.0.202",
+    "ai": "^7.0.17",
     "class-variance-authority": "^0.7.1",
     "flexsearch": "^0.8.212",
     "fumadocs-core": "16.10.2",
