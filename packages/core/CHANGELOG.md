@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3](https://github.com/50BytesOfJohn/panqueue/compare/core-v0.0.2...core-v0.0.3) (2026-08-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* QueueClient no longer exposes the `redis` getter, and @panqueue/client no longer exports RedisConnection, PanqueueProducerClient or ConnectionLifecycleHooks. @panqueue/core now exports only notifyKey, queueHashTag and queueKeys; the per-role key builders (activeKey, jobKey, queueKey, ...) are internal to keys.ts.
+
+### Features
+
+* **core:** add concurrency key for queue global limits ([4700310](https://github.com/50BytesOfJohn/panqueue/commit/4700310bb3ff6b36ee0851412f4c54f21a1c66cf))
+
+
+### Code Refactoring
+
+* cut duplicated connection/teardown code and dead exports ([#42](https://github.com/50BytesOfJohn/panqueue/issues/42)) ([b68b250](https://github.com/50BytesOfJohn/panqueue/commit/b68b25002a848c4a018b69cb228e89c8c7f1ca34))
+
 ## [0.0.2](https://github.com/50BytesOfJohn/panqueue/compare/core-v0.0.1...core-v0.0.2) (2026-06-12)
 
 

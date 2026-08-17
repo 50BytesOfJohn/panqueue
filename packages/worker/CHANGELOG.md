@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.0.4](https://github.com/50BytesOfJohn/panqueue/compare/worker-v0.0.3...worker-v0.0.4) (2026-08-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* QueueClient no longer exposes the `redis` getter, and @panqueue/client no longer exports RedisConnection, PanqueueProducerClient or ConnectionLifecycleHooks. @panqueue/core now exports only notifyKey, queueHashTag and queueKeys; the per-role key builders (activeKey, jobKey, queueKey, ...) are internal to keys.ts.
+
+### Features
+
+* **worker:** add versioned global concurrency limit ([4e48a28](https://github.com/50BytesOfJohn/panqueue/commit/4e48a28ed3c1332a3d26ea857700866b6f6c23e3))
+* **worker:** batch claim jobs in a single Redis round trip ([c5e0e3f](https://github.com/50BytesOfJohn/panqueue/commit/c5e0e3f40dea2170be6a140b47c80d7c62c8a891))
+
+
+### Bug Fixes
+
+* **worker:** fix lost-wakeup race and unify acknowledgement handling ([2da6eea](https://github.com/50BytesOfJohn/panqueue/commit/2da6eea08ea69dda605dfca53a4a76fc87fecfa3))
+
+
+### Code Refactoring
+
+* cut duplicated connection/teardown code and dead exports ([#42](https://github.com/50BytesOfJohn/panqueue/issues/42)) ([b68b250](https://github.com/50BytesOfJohn/panqueue/commit/b68b25002a848c4a018b69cb228e89c8c7f1ca34))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @panqueue/config bumped to 0.0.3
+    * @panqueue/core bumped to 0.0.3
+
 ## [0.0.3](https://github.com/50BytesOfJohn/panqueue/compare/worker-v0.0.2...worker-v0.0.3) (2026-07-01)
 
 

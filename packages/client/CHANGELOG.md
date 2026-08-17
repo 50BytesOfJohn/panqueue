@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.0.3](https://github.com/50BytesOfJohn/panqueue/compare/client-v0.0.2...client-v0.0.3) (2026-08-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* QueueClient no longer exposes the `redis` getter, and @panqueue/client no longer exports RedisConnection, PanqueueProducerClient or ConnectionLifecycleHooks. @panqueue/core now exports only notifyKey, queueHashTag and queueKeys; the per-role key builders (activeKey, jobKey, queueKey, ...) are internal to keys.ts.
+
+### Code Refactoring
+
+* cut duplicated connection/teardown code and dead exports ([#42](https://github.com/50BytesOfJohn/panqueue/issues/42)) ([b68b250](https://github.com/50BytesOfJohn/panqueue/commit/b68b25002a848c4a018b69cb228e89c8c7f1ca34))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @panqueue/config bumped to 0.0.3
+    * @panqueue/core bumped to 0.0.3
+
 ## [0.0.2](https://github.com/50BytesOfJohn/panqueue/compare/client-v0.0.1...client-v0.0.2) (2026-06-12)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "@panqueue/core",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Shared types, key helpers, and serialization primitives for panqueue.",
   "keywords": [
     "background-jobs",

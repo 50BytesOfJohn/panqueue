@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.3](https://github.com/50BytesOfJohn/panqueue/compare/config-v0.0.2...config-v0.0.3) (2026-08-17)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @panqueue/core bumped to 0.0.3
+
 ## [0.0.2](https://github.com/50BytesOfJohn/panqueue/compare/config-v0.0.1...config-v0.0.2) (2026-06-12)
 
 
