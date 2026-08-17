@@ -117,6 +117,26 @@ export interface WorkerPoolOptions<TQueues extends QueueMap = QueueMap> {
 /** Lifecycle states of the pool. */
 type PoolState = "idle" | "starting" | "running" | "stopping" | "stopped";
 
+const ignore = () => {};
+
+/**
+ * Best-effort teardown of the pool's sockets, shared by a failed start and a
+ * normal shutdown. Close failures are swallowed: on the start path they would
+ * mask the error that caused the teardown, on the shutdown path there is
+ * nothing left to do about them.
+ */
+async function closeConnections(
+  redis: RedisConnection | null,
+  subscriber: RedisSubscriberConnection | null,
+  channels: string[],
+): Promise<void> {
+  if (subscriber) {
+    if (channels.length > 0) await subscriber.client.unsubscribe(channels).catch(ignore);
+    await subscriber.disconnect().catch(ignore);
+  }
+  await redis?.disconnect().catch(ignore);
+}
+
 /**
  * Owns Redis connections and runs the workers attached at construction
  * time. A pool opens exactly one command client and one subscriber socket,
@@ -250,23 +270,7 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
       this.#runners = runners;
       this.#state = "running";
     } catch (err) {
-      if (subscriber && subscribedChannels.length > 0) {
-        try {
-          await subscriber.client.unsubscribe(subscribedChannels);
-        } catch {
-          /* ignore */
-        }
-      }
-      try {
-        await subscriber?.disconnect();
-      } catch {
-        /* ignore */
-      }
-      try {
-        await redis.disconnect();
-      } catch {
-        /* ignore */
-      }
+      await closeConnections(redis, subscriber, subscribedChannels);
       this.#state = "stopped";
       if (err instanceof PanqueueError) throw err;
       throw new WorkerConnectionError(err);
@@ -354,13 +358,7 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
   }
 
   async #doShutdown(mode: "force" | "drain", options?: ShutdownOptions): Promise<ShutdownResult> {
-    if (this.#startPromise) {
-      try {
-        await this.#startPromise;
-      } catch {
-        /* ignore */
-      }
-    }
+    await this.#startPromise?.catch(ignore);
 
     if (this.#state !== "running") {
       const result: ShutdownResult = {
@@ -396,23 +394,7 @@ export class WorkerPool<TQueues extends QueueMap = QueueMap> {
     }
 
     const channels = runners.map((r) => notifyKey(r.queueId));
-    if (this.#subscriber && channels.length > 0) {
-      try {
-        await this.#subscriber.client.unsubscribe(channels);
-      } catch {
-        /* ignore */
-      }
-    }
-    try {
-      await this.#subscriber?.disconnect();
-    } catch {
-      /* ignore */
-    }
-    try {
-      await this.#redis?.disconnect();
-    } catch {
-      /* ignore */
-    }
+    await closeConnections(this.#redis, this.#subscriber, channels);
 
     for (const runner of runners) runner.finalize();
 

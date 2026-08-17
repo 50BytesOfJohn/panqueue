@@ -7,7 +7,9 @@ import { BaseJobScheduler, type ClaimResult } from "./base.js";
  * a non-array reply or a `deserializeJobHash` failure becomes a corrupt result
  * with a best-effort jobId, so one bad entry can never abort a whole batch.
  */
-function decodeClaimEntry<T extends JsonSerializable>(entry: unknown): Exclude<ClaimResult<T>, null> {
+function decodeClaimEntry<T extends JsonSerializable>(
+  entry: unknown,
+): Exclude<ClaimResult<T>, null> {
   if (!Array.isArray(entry)) {
     return { corrupt: true, jobId: "unknown" };
   }

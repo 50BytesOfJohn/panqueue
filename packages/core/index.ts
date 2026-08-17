@@ -9,19 +9,7 @@ export type {
 
 export type { QueueKey, QueueKeys } from "./src/keys.js";
 
-export {
-  activeKey,
-  completedKey,
-  concurrencyKey,
-  delayedKey,
-  failedKey,
-  jobKey,
-  notifyKey,
-  queueHashTag,
-  queueKey,
-  queueKeys,
-  waitingKey,
-} from "./src/keys.js";
+export { notifyKey, queueHashTag, queueKeys } from "./src/keys.js";
 
 export type { ResolvedRetention, RetentionRule } from "./src/retention.js";
 

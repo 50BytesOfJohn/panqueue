@@ -47,6 +47,9 @@ export interface ConnectionLifecycleHooks {
   onReady?(): void;
 }
 
+/** The single client both roles open; each class exposes only its own half. */
+type RawClient = PanqueueWorkerClient & PanqueueSubscriber;
+
 /** Reconnect attempts allowed before the *initial* connect gives up. */
 const INITIAL_CONNECT_ATTEMPTS = 3;
 
@@ -88,7 +91,10 @@ function buildClientOptions(options: ConnectionOptions): RedisClientOptions {
  * daemon, so commands issued during an outage wait for the reconnect rather
  * than failing.
  */
-async function openRawClient(options: ConnectionOptions, hooks: ConnectionLifecycleHooks) {
+async function openRawClient(
+  options: ConnectionOptions,
+  hooks: ConnectionLifecycleHooks,
+): Promise<RawClient> {
   let everConnected = false;
 
   const base = buildClientOptions(options);
@@ -120,16 +126,22 @@ async function openRawClient(options: ConnectionOptions, hooks: ConnectionLifecy
   return client;
 }
 
-/** Thin wrapper around the command-mode redis client for lifecycle management. */
-export class RedisConnection {
-  #options: ConnectionOptions;
-  #hooks: ConnectionLifecycleHooks;
-  #client: PanqueueWorkerClient | null = null;
+/**
+ * Lifecycle for one socket. Command and subscriber roles open the identical
+ * raw client and differ only in the surface they expose, so the narrowing
+ * lives in the subclass `client` getter.
+ */
+abstract class Connection {
+  protected readonly options: ConnectionOptions;
+  readonly #hooks: ConnectionLifecycleHooks;
+  readonly #role: string;
+  #client: RawClient | null = null;
   #connectPromise: Promise<void> | null = null;
 
-  constructor(options: ConnectionOptions, hooks: ConnectionLifecycleHooks = {}) {
-    this.#options = options;
+  protected constructor(options: ConnectionOptions, hooks: ConnectionLifecycleHooks, role: string) {
+    this.options = options;
     this.#hooks = hooks;
+    this.#role = role;
   }
 
   /** Connect to Redis. Must be called before using the client. */
@@ -146,7 +158,7 @@ export class RedisConnection {
   }
 
   async #doConnect(): Promise<void> {
-    this.#client = await openRawClient(this.#options, this.#hooks);
+    this.#client = await openRawClient(this.options, this.#hooks);
   }
 
   /** Gracefully disconnect from Redis. */
@@ -160,67 +172,40 @@ export class RedisConnection {
     await this.disconnect();
   }
 
-  /** The command-mode client. Throws if not connected. */
-  get client(): PanqueueWorkerClient {
+  /** The connected client. Throws if not connected. */
+  protected get raw(): RawClient {
     if (!this.#client) {
-      throw new PanqueueError("Redis client is not connected. Call connect() first.");
+      throw new PanqueueError(`Redis ${this.#role} is not connected. Call connect() first.`);
     }
     return this.#client;
+  }
+}
+
+/** Command-mode connection. Exposes the queue scripts, never pub/sub. */
+export class RedisConnection extends Connection {
+  constructor(options: ConnectionOptions, hooks: ConnectionLifecycleHooks = {}) {
+    super(options, hooks, "client");
+  }
+
+  get client(): PanqueueWorkerClient {
+    return this.raw;
   }
 
   /** Open a separate subscriber connection sharing this connection's config. */
   async duplicate(hooks: ConnectionLifecycleHooks = {}): Promise<RedisSubscriberConnection> {
-    const dup = new RedisSubscriberConnection(this.#options, hooks);
+    const dup = new RedisSubscriberConnection(this.options, hooks);
     await dup.connect();
     return dup;
   }
 }
 
 /** Subscriber-mode connection. Exposes only pub/sub operations. */
-export class RedisSubscriberConnection {
-  #options: ConnectionOptions;
-  #hooks: ConnectionLifecycleHooks;
-  #client: PanqueueSubscriber | null = null;
-  #connectPromise: Promise<void> | null = null;
-
+export class RedisSubscriberConnection extends Connection {
   constructor(options: ConnectionOptions, hooks: ConnectionLifecycleHooks = {}) {
-    this.#options = options;
-    this.#hooks = hooks;
+    super(options, hooks, "subscriber");
   }
 
-  /** Connect to Redis. Must be called before using the client. */
-  async connect(): Promise<void> {
-    if (this.#client) return;
-    if (this.#connectPromise) return this.#connectPromise;
-
-    this.#connectPromise = this.#doConnect();
-    try {
-      await this.#connectPromise;
-    } finally {
-      this.#connectPromise = null;
-    }
-  }
-
-  async #doConnect(): Promise<void> {
-    this.#client = await openRawClient(this.#options, this.#hooks);
-  }
-
-  /** Gracefully disconnect from Redis. */
-  async disconnect(): Promise<void> {
-    if (!this.#client) return;
-    await this.#client.disconnect();
-    this.#client = null;
-  }
-
-  async [Symbol.asyncDispose](): Promise<void> {
-    await this.disconnect();
-  }
-
-  /** The subscriber-mode client. Throws if not connected. */
   get client(): PanqueueSubscriber {
-    if (!this.#client) {
-      throw new PanqueueError("Redis subscriber is not connected. Call connect() first.");
-    }
-    return this.#client;
+    return this.raw;
   }
 }
