@@ -156,23 +156,21 @@ class QueueClient<TQueues extends QueueMap = QueueMap> {
     data: TQueues[K],
     options?: EnqueueOptions,
   ): Promise<string>;
-  get redis(): RedisConnection;
   async [Symbol.asyncDispose](): Promise<void>;
 }
 ```
 
-| Export                  | Kind  | Description                                                          |
-| ----------------------- | ----- | -------------------------------------------------------------------- |
-| `QueueClient`           | Class | Type-safe producer client with lazy Redis connection.                |
-| `RedisConnection`       | Class | Thin wrapper around the `redis` npm client for connection lifecycle. |
-| `EnqueueOptions`        | Type  | Per-job options: `retries` and `maxStalls`.                          |
-| `QueueClientConfig`     | Type  | Standalone client config shaped `{ redis: ConnectionOptions }`.      |
-| `QueueClientOptions`    | Type  | Constructor options: connection `events` handlers.                   |
-| `ClientConnectionError` | Class | Redis unreachable; retryable.                                        |
-| `ClientClosedError`     | Class | Client used after `disconnect()`.                                    |
-| `EnqueueError`          | Class | Redis rejected the enqueue command.                                  |
-| `PanqueueError`         | Class | Base class for every error Panqueue throws (re-exported from core).  |
-| `SerializationError`    | Class | Payload not JSON-serializable (re-exported from core).               |
+| Export                  | Kind  | Description                                                         |
+| ----------------------- | ----- | ------------------------------------------------------------------- |
+| `QueueClient`           | Class | Type-safe producer client with lazy Redis connection.               |
+| `EnqueueOptions`        | Type  | Per-job options: `retries` and `maxStalls`.                         |
+| `QueueClientConfig`     | Type  | Standalone client config shaped `{ redis: ConnectionOptions }`.     |
+| `QueueClientOptions`    | Type  | Constructor options: connection `events` handlers.                  |
+| `ClientConnectionError` | Class | Redis unreachable; retryable.                                       |
+| `ClientClosedError`     | Class | Client used after `disconnect()`.                                   |
+| `EnqueueError`          | Class | Redis rejected the enqueue command.                                 |
+| `PanqueueError`         | Class | Base class for every error Panqueue throws (re-exported from core). |
+| `SerializationError`    | Class | Payload not JSON-serializable (re-exported from core).              |
 
 <Callout type="info" title="One client per queue set">
   A single `QueueClient` can enqueue to any queue in the `QueueMap` generic. You do not need a

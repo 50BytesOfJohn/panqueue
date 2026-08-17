@@ -91,7 +91,7 @@ export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializ
       tag: this.tag,
       retention: this.retention.completed,
     });
-    return parseCompleteResult(result);
+    return parseStatus<CompleteResult>("complete", ["completed", "stale", "missing"], result);
   }
 
   /** Mark a job as failed. Returns the resulting status. */
@@ -103,7 +103,7 @@ export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializ
       tag: this.tag,
       retention: this.retention.failed,
     });
-    return parseFailResult(result);
+    return parseStatus<FailResult>("fail", ["waiting", "failed", "stale", "missing"], result);
   }
 
   /** Extend the lease deadline on an active job. Returns true if extended. */
@@ -114,7 +114,7 @@ export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializ
       leaseMs,
       tag: this.tag,
     });
-    return parseExtendLockResult(result);
+    return parseStatus<ExtendLockResult>("extendLock", ["extended", "stale", "missing"], result);
   }
 
   /**
@@ -133,7 +133,11 @@ export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializ
       reason,
       tag: this.tag,
     });
-    return parseRequeueActiveResult(result);
+    return parseStatus<RequeueActiveResult>(
+      "requeueActive",
+      ["waiting", "stale", "missing"],
+      result,
+    );
   }
 
   /**
@@ -151,25 +155,11 @@ export abstract class BaseJobScheduler<T extends JsonSerializable = JsonSerializ
   }
 }
 
-function parseCompleteResult(result: unknown): CompleteResult {
-  if (result === "completed" || result === "stale" || result === "missing") return result;
-  throw new Error(`Unexpected complete result: ${String(result)}`);
-}
-
-function parseFailResult(result: unknown): FailResult {
-  if (result === "waiting" || result === "failed" || result === "stale" || result === "missing")
-    return result;
-  throw new Error(`Unexpected fail result: ${String(result)}`);
-}
-
-function parseExtendLockResult(result: unknown): ExtendLockResult {
-  if (result === "extended" || result === "stale" || result === "missing") return result;
-  throw new Error(`Unexpected extendLock result: ${String(result)}`);
-}
-
-function parseRequeueActiveResult(result: unknown): RequeueActiveResult {
-  if (result === "waiting" || result === "stale" || result === "missing") return result;
-  throw new Error(`Unexpected requeueActive result: ${String(result)}`);
+/** Narrow a script's status reply to the outcomes that script can return. */
+function parseStatus<T extends string>(op: string, allowed: readonly T[], result: unknown): T {
+  const status = allowed.find((value) => value === result);
+  if (status === undefined) throw new Error(`Unexpected ${op} result: ${String(result)}`);
+  return status;
 }
 
 function parseRecoveredJobs<T extends JsonSerializable>(result: unknown): RecoveredJob<T>[] {

@@ -10,7 +10,7 @@ interface Waiter {
  * Used by the Worker to limit the number of concurrently processing jobs.
  */
 export class Semaphore {
-  #max: number;
+  readonly #max: number;
   #current: number = 0;
   #waiters: Waiter[] = [];
 
@@ -22,11 +22,6 @@ export class Semaphore {
   /** Number of permits currently available. */
   get available(): number {
     return this.#max - this.#current;
-  }
-
-  /** Number of waiters blocked on acquire(). */
-  get pending(): number {
-    return this.#waiters.length;
   }
 
   /**

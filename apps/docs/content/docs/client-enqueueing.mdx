@@ -274,9 +274,6 @@ class QueueClient<TQueues extends QueueMap = QueueMap> {
     options?: EnqueueOptions,
   ): Promise<string>;
 
-  /** Access the underlying Redis connection (for internal/advanced use). */
-  get redis(): RedisConnection;
-
   async [Symbol.asyncDispose](): Promise<void>;
 }
 ```

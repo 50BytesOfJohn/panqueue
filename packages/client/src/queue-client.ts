@@ -176,9 +176,4 @@ export class QueueClient<TQueues extends QueueMap = QueueMap> {
   async [Symbol.asyncDispose](): Promise<void> {
     await this.disconnect();
   }
-
-  /** Access the underlying Redis connection (for internal/advanced use). */
-  get redis(): RedisConnection {
-    return this.#redis;
-  }
 }

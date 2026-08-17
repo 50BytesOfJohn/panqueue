@@ -176,13 +176,7 @@ export class WorkerRunner {
       return { unfinishedJobs: 0, requeued: 0 };
     }
 
-    for (const entry of stillRunning) {
-      try {
-        entry.stopRenewer();
-      } catch {
-        /* swallow */
-      }
-    }
+    for (const entry of stillRunning) entry.stopRenewer();
 
     let requeued = 0;
     const results = await Promise.allSettled(

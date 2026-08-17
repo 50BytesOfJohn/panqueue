@@ -220,17 +220,17 @@ recovery reason rather than a value thrown by your code.
 
 ## All events
 
-| Event            | Fires when                                                         |
-| ---------------- | ------------------------------------------------------------------ |
-| `onJobStarted`   | A claimed job begins processing.                                   |
-| `onJobCompleted` | A job completes successfully.                                      |
-| `onJobError`     | The handler throws, regardless of outcome.                         |
-| `onJobRetry`     | A failure is recorded and the job is requeued for another attempt. |
-| `onJobFailed`    | A job fails terminally — no retries remain.                        |
-| `onJobStale`     | An acknowledgement was fenced off (the job's lease was lost).      |
-| `onJobAckError`  | A complete/fail acknowledgement failed or returned unusable state. |
+| Event            | Fires when                                                                        |
+| ---------------- | --------------------------------------------------------------------------------- |
+| `onJobStarted`   | A claimed job begins processing.                                                  |
+| `onJobCompleted` | A job completes successfully.                                                     |
+| `onJobError`     | The handler throws, regardless of outcome.                                        |
+| `onJobRetry`     | A failure is recorded and the job is requeued for another attempt.                |
+| `onJobFailed`    | A job fails terminally — no retries remain.                                       |
+| `onJobStale`     | An acknowledgement was fenced off (the job's lease was lost).                     |
+| `onJobAckError`  | A complete/fail acknowledgement failed or returned unusable state.                |
 | `onWorkerError`  | An internal worker error: claiming, lease renewal, recovery sweeps, corrupt jobs. |
-| `onStateChange`  | The worker transitions between lifecycle states.                   |
+| `onStateChange`  | The worker transitions between lifecycle states.                                  |
 
 ### onJobStarted
 
