@@ -27,12 +27,12 @@
     "@panqueue/config": "workspace:*",
     "@panqueue/core": "workspace:*",
     "@panqueue/worker": "workspace:*",
-    "oxfmt": "^0.57.0",
-    "oxlint": "^1.72.0",
-    "publint": "^0.3.21",
-    "tsdown": "^0.22.3",
+    "oxfmt": "^0.64.0",
+    "oxlint": "^1.79.0",
+    "publint": "^0.3.23",
+    "tsdown": "^0.22.14",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=22"
