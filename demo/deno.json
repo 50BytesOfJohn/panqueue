@@ -4,10 +4,10 @@
     "worker": "deno run --allow-net --allow-env process_jobs.ts"
   },
   "imports": {
-    "redis": "npm:redis@^6",
-    "@panqueue/core": "../packages/core/dist/mod.js",
-    "@panqueue/config": "../packages/config/dist/mod.js",
-    "@panqueue/client": "../packages/client/dist/mod.js",
-    "@panqueue/worker": "../packages/worker/dist/mod.js"
+    "redis": "npm:redis@^6.2.1",
+    "@panqueue/core": "../packages/core/dist/index.js",
+    "@panqueue/config": "../packages/config/dist/index.js",
+    "@panqueue/client": "../packages/client/dist/index.js",
+    "@panqueue/worker": "../packages/worker/dist/index.js"
   }
 }

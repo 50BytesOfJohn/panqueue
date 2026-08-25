@@ -40,7 +40,7 @@
   "dependencies": {
     "@panqueue/config": "workspace:*",
     "@panqueue/core": "workspace:*",
-    "redis": "^6"
+    "redis": "^6.2.1"
   },
   "engines": {
     "node": ">=22"

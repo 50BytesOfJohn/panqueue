@@ -1,5 +1,13 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { convertToModelMessages, stepCountIs, streamText, tool, type UIMessage } from "ai";
+import {
+  convertToModelMessages,
+  createUIMessageStreamResponse,
+  isStepCount,
+  streamText,
+  tool,
+  toUIMessageStream,
+  type UIMessage,
+} from "ai";
 import { Document, type DocumentData } from "flexsearch";
 import type { ApiContext } from "waku/router";
 import { z } from "zod";
@@ -79,26 +87,29 @@ export async function POST(req: Request, _context: ApiContext<"/api/chat">) {
 
   const result = streamText({
     model: openrouter.chat(process.env.OPENROUTER_MODEL ?? "google/gemini-3.1-flash-lite"),
-    stopWhen: stepCountIs(5),
+    instructions: systemPrompt,
+    stopWhen: isStepCount(5),
     tools: {
       search: searchTool,
     },
-    messages: [
-      { role: "system", content: systemPrompt },
-      ...(await convertToModelMessages<ChatUIMessage>(reqJson.messages ?? [], {
-        convertDataPart(part) {
-          if (part.type === "data-client")
-            return {
-              type: "text",
-              text: `[Client Context: ${JSON.stringify(part.data)}]`,
-            };
-        },
-      })),
-    ],
+    messages: await convertToModelMessages<ChatUIMessage>(reqJson.messages ?? [], {
+      convertDataPart(part) {
+        if (part.type === "data-client")
+          return {
+            type: "text",
+            text: `[Client Context: ${JSON.stringify(part.data)}]`,
+          };
+      },
+    }),
     toolChoice: "auto",
   });
 
-  return result.toUIMessageStreamResponse();
+  return createUIMessageStreamResponse({
+    stream: toUIMessageStream({
+      stream: result.stream,
+      tools: { search: searchTool },
+    }),
+  });
 }
 
 export type SearchTool = typeof searchTool;

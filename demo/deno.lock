@@ -1,0 +1,56 @@
+{
+  "version": "5",
+  "specifiers": {
+    "npm:redis@^6.2.1": "6.2.1"
+  },
+  "npm": {
+    "@redis/bloom@6.2.1_@redis+client@6.2.1": {
+      "integrity": "sha512-huQgNLaCIZfQ9SeLn4q9124uOUd8HbZDYHwwUzNcRgHqCHiHKl2dDxMqJCeWh8cMqZAoWuHR8XnWbDMIf+o7ag==",
+      "dependencies": [
+        "@redis/client"
+      ]
+    },
+    "@redis/client@6.2.1": {
+      "integrity": "sha512-LzxBY7SIBvvJiyCgcaJZZakE3fJrZZ++i24+EDW9fKpCl68D35uJcKFpZZwCfOoG9WZTbyZlMzMeM0gtOAMU9Q==",
+      "dependencies": [
+        "cluster-key-slot"
+      ]
+    },
+    "@redis/json@6.2.1_@redis+client@6.2.1": {
+      "integrity": "sha512-AFIUJ8Gj0DaaSBHYuSt8+O0oYWM+50OK1c0OmodB7XERIA8+BbyV3O4v76f9iccWasd1/7qjfZTpuzexUaZtrQ==",
+      "dependencies": [
+        "@redis/client"
+      ]
+    },
+    "@redis/search@6.2.1_@redis+client@6.2.1": {
+      "integrity": "sha512-2vfOAOyYFE7UUw3sBBlkqqruBtOUS4HRY5MtW4hp83llrwvtrTE4r22CEqXddlV+54zkLxBE4nmsIJ/dpezQrQ==",
+      "dependencies": [
+        "@redis/client"
+      ]
+    },
+    "@redis/time-series@6.2.1_@redis+client@6.2.1": {
+      "integrity": "sha512-kiYniph04dJOole+L359B6C9E+jYS2uDP7hca6Onj0xF38ZIpyxARO0Iq0W4ZRn1e8Q6vqW00QFZVSMRA/2Ijw==",
+      "dependencies": [
+        "@redis/client"
+      ]
+    },
+    "cluster-key-slot@1.1.2": {
+      "integrity": "sha512-RMr0FhtfXemyinomL4hrWcYJxmX6deFdCxpJzhDttxgO1+bcCnkk+9drydLVDmAMG7NE6aN/fl4F7ucU/90gAA=="
+    },
+    "redis@6.2.1": {
+      "integrity": "sha512-Z9VHtgYs48PiQC77X9O2Er8Hj4T+5BtFjT91/vi5Is1D04N72cA946ZslM1ImJw8ZctFBZWAVjM7S5wJNeHMpg==",
+      "dependencies": [
+        "@redis/bloom",
+        "@redis/client",
+        "@redis/json",
+        "@redis/search",
+        "@redis/time-series"
+      ]
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "npm:redis@^6.2.1"
+    ]
+  }
+}
