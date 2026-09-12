@@ -28,10 +28,10 @@
     "@panqueue/config": "workspace:*",
     "@panqueue/core": "workspace:*",
     "@panqueue/worker": "workspace:*",
-    "oxfmt": "^0.64.0",
-    "oxlint": "^1.79.0",
+    "oxfmt": "^0.67.0",
+    "oxlint": "^1.82.0",
     "publint": "^0.3.24",
-    "tsdown": "^0.22.14",
+    "tsdown": "^0.23.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   },
